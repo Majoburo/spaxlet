@@ -41,7 +41,7 @@ def blackbody(l,T=10000):
     bb /= bb.sum()
     return bb
 
-def moffat(seeing, amplitude = None, center = (0,0),mode=None,factor=None, size=None):
+def moffat(seeing, amplitude = None, center = (0,0),mode=None,factor=None, xsize=None,ysize=None):
     alpha = 3.5
     gamma = 0.5 * seeing / np.sqrt(2**(1./alpha) - 1.)
     if amplitude == None:
@@ -51,52 +51,82 @@ def moffat(seeing, amplitude = None, center = (0,0),mode=None,factor=None, size=
                             center[1],
                             gamma,
                             alpha,
-                            x_size=size,
+                            x_size=xsize,
+                            y_size=ysize,
                             mode=mode,
                             factor=factor)
     return morph
+#class BlackbodyCubeSamplerCut(object):
+#    '''
+#    Failed class. Keeping for record.
+#    '''
+#    def __init__(self,wl,sizex,sizey,size=None,seeing=3,oversampling=20.0):
+#        self.wl = wl
+#        self.seeing = seeing
+#        if size is None:
+#            morph = moffat(seeing/0.75*oversampling, center=(0,0), mode='center')
+#            self.size = morph._default_size / (oversampling*2)
+#        else:
+#            self.size = size
+#            morph = moffat(seeing/0.75*oversampling, center=(0,0), mode='center',size=size*2*oversampling)
+#        size = self.size
+#        morph = morph.array
+#        x = np.linspace(-size,size,size*2*oversampling)
+#        y = np.linspace(-size,size,size*2*oversampling)
+#        f = interp2d(x,y,morph)
+#        self.size = round(self.size)
+#        self.sizex = sizex
+#        self.sizey = sizey
+#        self._f = f
+#    def sample(self,T,A,x0,y0):
+#        size = self.size
+#        sizex = self.sizex
+#        sizey = self.sizey
+#        minx = max(-size/2., ceil(2*(- x0 - sizex/2))/2)
+#        maxx = min( size/2., floor(2*(- x0 + sizex/2))/2)
+#        miny = max(-size/2., ceil(2*(- y0 - sizey/2))/2)
+#        maxy = min( size/2., floor(2*(- y0 + sizey/2))/2)
+#        x = np.arange(minx+1/2,maxx+1/2,1)
+#        y = np.arange(miny+1/2,maxy+1/2,1)
+#        spectra = A*blackbody(self.wl, T)
+#        dx0 = x0-round(x0*2)/2
+#        dy0 = y0-round(y0*2)/2
+#        morph = self._f(x-dx0,y-dy0)
+#        cube = np.outer(spectra.T, morph)
+#        cube.shape = (len(spectra), morph.shape[0], morph.shape[1])
+#        return cube
+
 class BlackbodyCubeSampler(object):
-    def __init__(self,wl,sizex,sizey,size=None,seeing=3,oversampling=20.0):
+    def __init__(self,wl,xsize,ysize=None,seeing=3,oversampling=20.0):
         self.wl = wl
         self.seeing = seeing
-        if size is None:
-            morph = moffat(seeing/0.75*oversampling, center=(0,0), mode='center')
-            self.size = morph._default_size / (oversampling*2)
-        else:
-            self.size = size
-            morph = moffat(seeing/0.75*oversampling, center=(0,0), mode='center',size=size*2*oversampling)
-        size = self.size
+        if ysize == None:
+            ysize = xsize
+        self.xsize = xsize
+        self.ysize = ysize
+        morph = moffat(seeing/0.75*oversampling,
+                       center=(0,0), mode='center',
+                       xsize=xsize*2*oversampling,
+                       ysize=ysize*2*oversampling)
         morph = morph.array
-        x = np.linspace(-size,size,size*2*oversampling)
-        y = np.linspace(-size,size,size*2*oversampling)
-        f = interp2d(x,y,morph)
-        self.size = round(self.size)
-        self.sizex = sizex
-        self.sizey = sizey
-        self._f = f
-    def sample(self,T,A,x0,y0):
-        size = self.size
-        sizex = self.sizex
-        sizey = self.sizey
-        minx = max(-size/2., ceil(2*(- x0 - sizex/2))/2)
-        maxx = min( size/2., floor(2*(- x0 + sizex/2))/2)
-        miny = max(-size/2., ceil(2*(- y0 - sizey/2))/2)
-        maxy = min( size/2., floor(2*(- y0 + sizey/2))/2)
         #import pdb; pdb.set_trace()
-        x = np.arange(minx+1/2,maxx+1/2,1)
-        y = np.arange(miny+1/2,maxy+1/2,1)
+        x = np.arange(-xsize, xsize, 1/oversampling) + 1/(2*oversampling)
+        y = np.arange(-ysize, ysize, 1/oversampling) + 1/(2*oversampling)
+        f = interp2d(x,y,morph,kind='linear')
+        self._f = f
+        self.x = np.arange(-xsize/2,xsize/2,1) + 1/2
+        self.y = np.arange(-ysize/2,ysize/2,1) + 1/2
+    def sample(self,T,A,x0,y0):
         spectra = A*blackbody(self.wl, T)
-        dx0 = x0-round(x0*2)/2
-        dy0 = y0-round(y0*2)/2
-        morph = self._f(x-dx0,y-dy0)
+        #import pdb; pdb.set_trace()
+        morph = self._f(self.x-x0,self.y-y0)
         cube = np.outer(spectra.T, morph)
         cube.shape = (len(spectra), morph.shape[0], morph.shape[1])
         return cube
-
-#def blackbodycube(T, A, x, y, wl, size, seeing):
-#    spectra = A*blackbody(wl, T)
-#    morph = moffat(seeing*1/0.75, center=(x,y), mode='oversample', factor= 20, size=size)
-#    cube = np.outer(spectra.T, morph)
-#    cube.shape = (len(spectra), morph.shape[0], morph.shape[1])
-#    return cube
+def blackbodycube(T, A, x, y, wl, size, seeing):
+    spectra = A*blackbody(wl, T)
+    morph = moffat(seeing*1/0.75, center=(x,y), mode='oversample', factor= 20, xsize=size,ysize=size)
+    cube = np.outer(spectra.T, morph)
+    cube.shape = (len(spectra), morph.shape[0], morph.shape[1])
+    return cube
 
