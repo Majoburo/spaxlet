@@ -16,6 +16,7 @@ import glob
 from functools import partial
 matplotlib.rc('image', cmap='inferno', interpolation='none', origin='lower')
 basename = ""
+sextractor = True
 
 def cleandata(chdu,ehdu):
     """
@@ -89,14 +90,40 @@ def select_sources(cube,ifu_wl,pd_table,stretch = 100, Q = 5, minimum = 0):
     ifu_rgb = np.array([ wavelength_to_rgb(wl) for wl in ifu_wl]).T
     norm = AsinhMapping(minimum=minimum, stretch=stretch, Q=Q)
     img_rgb = scarlet.display.img_to_rgb(cube, channel_map=ifu_rgb, norm=norm)
-    from pointshifter import pointshifter
-    shiftedpoints = pointshifter(img_rgb,pd_table[['x','y']].to_numpy())
-    pd_table.x = shiftedpoints[:,0]
-    pd_table.y = shiftedpoints[:,1]
     from pointpicker import pointpicker
-    srcdic = pointpicker(img_rgb,pd_table[['x','y']].to_numpy())
-
+    #plt.imshow(cube.sum(axis=0))
+    #img_rgb = cube.sum(axis=0)
+    if sextractor:
+        sexx, sexy = identify_sources(pd_table.name, plot=False)
+        sexpts = np.array(list(zip(sexx,sexy)))
+        srcdic = pointpicker(img_rgb, sexpts)
+        for srctype, indexes in srcdic.items():
+            srcdic[srctype] = sexpts[indexes]
+    else:
+        from pointshifter import pointshifter
+        shiftedpoints = pointshifter(img_rgb,pd_table[['x','y']].to_numpy())
+        pd_table.x = shiftedpoints[:,0]
+        pd_table.y = shiftedpoints[:,1]
+        srcdic = pointpicker(img_rgb,pd_table[['x','y']].to_numpy())
     return srcdic
+
+def identify_sources(fitsfile, plot=True):
+    os.chdir("../config")
+    os.system("sextractor "+ fitsfile)
+    sexdata = np.loadtxt('test.cat')
+    os.chdir("../junk")
+    xsrc = sexdata[:,5]-1
+    ysrc = sexdata[:,6]-1
+    if plot:
+        h = fits.open(fitsfile)
+        fig,ax = plt.subplots(1,2)
+        ax[0].imshow(np.log(h[0].data))
+        ax[1].imshow(np.log(h[0].data))
+        ax[1].scatter(xsrc,ysrc,color="r")
+        plt.show()
+
+    return xsrc, ysrc
+
 
 def define_model(images,weights,psf="moffatpsf.npy"):
     """ Create model psf and obsevation
@@ -106,8 +133,10 @@ def define_model(images,weights,psf="moffatpsf.npy"):
     # WARNING, using same arbitray psf for all now.
     out.shape = (len(images),start_psf.shape[0],start_psf.shape[1])
     psfs = scarlet.PSF(out)
-    model_psf = scarlet.PSF(partial(scarlet.psf.moffat, sigma=.8),
+    model_psf = scarlet.PSF(partial(scarlet.psf.gaussian, sigma=.8),
                             shape=(None, 8, 8))
+    #model_psf = scarlet.PSF(partial(scarlet.psf.moffat),
+    #                        shape=(None, 8, 8))
     model_frame = scarlet.Frame(
                   images.shape,
                   psfs=model_psf)
@@ -173,6 +202,7 @@ def main():
             basename = file.split("_cube")[0]
             ecube = path + "/" + basename + "_error_cube.fits"
             fcube = path + "/" + basename + ".fits"
+            ccube = path + "/" + basename + "cutout.fits"
             hdu = fits.open(fcube)
             w = wcs.WCS(hdu[0].header, hdu)
             cutout1 = Cutout2D(hdu[0].data, (hdu[0].shape[0]/2.-1,hdu[0].shape[1]/2.-1),63,w)
@@ -180,6 +210,7 @@ def main():
             chdu = fits.open(cube)
             ehdu = fits.open(ecube)
             chdu[0].header.update(w.to_header())
+            #chdu.writeto(cube)
 
         if chdu[0].header["INSTRUME"] == 'lrs2':
             print("No error cubes yet for lrs2. Exiting.")
@@ -189,9 +220,14 @@ def main():
         pd_table = query_ps_from_wcs(w)
         images, weights, ifu_wl, wmask = cleandata(chdu,ehdu)
         np.savez(path+"/"+basename+"_cleandata.npz",images=images, weights=weights, ifu_wl=ifu_wl, wmask=wmask)
+        hdu[0].data = (images*weights).sum(axis=0)
+        hdu[0].header.update(w.to_header())
+        hdu.writeto(ccube,overwrite=True)
+        pd_table.name = ccube
         srcdic = select_sources(images*weights, ifu_wl, pd_table)
-        for srctype, indexes in srcdic.items():
-            srcdic[srctype] = pd_table.iloc[indexes][['x','y']].to_numpy()
+        if not sextractor:
+            for srctype, indexes in srcdic.items():
+                srcdic[srctype] = pd_table.iloc[indexes][['x','y']].to_numpy()
         seeing = chdu[0].header['VSEEING']
         model_frame, observation = define_model(images,weights)
         sources = define_sources(srcdic,model_frame,observation)
@@ -209,11 +245,8 @@ def main():
                                  channel_map = ifu_rgb,
                                  norm=norm,
                                  show_observed=True)
-        plt.savefig()
+        plt.savefig(path + "/" + basename + ".png")
         import pickle
-        fp = open(path+"/"+basename+".sca", "wb")
-        pickle.dump(sources, fp)
-        fp.close()
         fp = open(path+"/"+basename+".sca", "wb")
         pickle.dump(sources, fp)
         fp.close()
