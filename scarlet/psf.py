@@ -7,8 +7,9 @@ from .fft import Fourier
 from .observation import Observation
 from astropy.convolution import Kernel2D
 from astropy.modeling import models
+import math
 
-def moffat_old(y, x, alpha=4.7, beta=1.5, bbox=None):
+def moffat(y, x, seeing=2, beta=3.5, bbox=None):
     """Symmetric 2D Moffat function
 
     .. math::
@@ -36,6 +37,7 @@ def moffat_old(y, x, alpha=4.7, beta=1.5, bbox=None):
         A 2D circular gaussian sampled at the coordinates `(y_i, x_j)`
         for all i and j in `shape`.
     """
+    alpha = 0.5 * seeing / np.sqrt(2**(1./beta) - 1.)
     Y = np.arange(bbox.shape[1]) + bbox.origin[1]
     X = np.arange(bbox.shape[2]) + bbox.origin[2]
     X, Y = np.meshgrid(X, Y)
@@ -60,7 +62,7 @@ class Moffat2DKernel(Kernel2D):
         self.normalize()
         self._truncation = None
 
-def moffat(seeing, alpha=3.5, amplitude=None, center=(0,0), mode='oversample', factor=20, size=None):
+def moffat_astropy(seeing, alpha=3.5, amplitude=None, center=(0,0), mode='oversample', factor=20, bbox=None):
     """Symmetric 2D Moffat Function
 
     Parameters
@@ -89,7 +91,7 @@ def moffat(seeing, alpha=3.5, amplitude=None, center=(0,0), mode='oversample', f
                 model over the bin.
     factor : interger, optional
         Factor of oversampling. Default factor = 10.
-    size : interger, optional
+    bbox : interger, optional
         Size of the kernel. Default size = fwhm.
 
     Returns
@@ -106,7 +108,7 @@ def moffat(seeing, alpha=3.5, amplitude=None, center=(0,0), mode='oversample', f
                             center[1],
                             gamma,
                             alpha,
-                            x_size=size,
+                            x_size=bbox.shape[1],
                             mode=mode,
                             factor=factor).array
     return morph

@@ -10,7 +10,7 @@ class BlackBody(bilby.Likelihood):
 #            'T': None,
 #            'A': None,
             'x': None,
-#            'y': None,
+            'y': None,
             })
         self.wl = wl
         self.images = images
@@ -24,7 +24,7 @@ class BlackBody(bilby.Likelihood):
         T = 5600 #self.parameters['T']
         A = 400 #self.parameters['A']
         x = self.parameters['x']
-        y = 0 #self.parameters['y']
+        y = self.parameters['y']
         images = self.images
         stds = self.stds
         #_, sizex, sizey = images.shape
@@ -33,8 +33,8 @@ class BlackBody(bilby.Likelihood):
         #cimages = images[:, miny:maxy, minx:maxx]
         #cstds = stds[:, miny:maxy, minx:maxx]
         #cstds = 1e-3*np.ones_like(images) #stds[:, miny:maxy, minx:maxx]
-        #bcss = self.bcs.sample(T,A,x,y)
-        bcss = blackbodycube(T, A, x, y, self.wl, images.shape[1], self.seeing)
+        bcss = self.bcs.sample(T,A,x,y)
+        #bcss = blackbodycube(T, A, x, y, self.wl, images.shape[1], self.seeing)
         res = (images - bcss)/stds
         #plt.imshow(images.sum(axis=0))
         #plt.show()
@@ -52,6 +52,8 @@ class BlackBody(bilby.Likelihood):
         #logl += np.log(np.sum(cimages))
         #print(x,y,logl)
         #print(logl)
+        plt.scatter(x+63/2,y+63/2,c="red",alpha=1-np.exp(logl))
+        plt.draw()
         return logl
 weights = 1/np.load('stds.npy')**2
 size = weights.shape[1]
@@ -75,14 +77,15 @@ def test_log_likelihood(args):
     plt.show()
     logl = -0.5 * np.sum(res ** 2) + -0.5*np.sum(np.log(2 * np.pi * cstds ** 2))
     return logl
-
+plt.ion()
+plt.imshow(images.sum(axis=0))
 likelihood = BlackBody(wl, images, weights, seeing)
 uniform = bilby.core.prior.Uniform
 priors = dict(
 #        T=uniform(name='T',minimum=1e3,maximum=1e4),
 #        A=uniform(name='A',minimum=0,maximum=1e3),
         x=uniform(name='x',minimum=-size/2+2,maximum=size/2-2),
-#        y=uniform(name='y',minimum=-size/2+2,maximum=size/2-2),
+        y=uniform(name='y',minimum=-size/2+2,maximum=size/2-2),
         #x=uniform(name='x',minimum=-size/2,maximum=-29),
         #y=uniform(name='y',minimum=-3,maximum=3),
         )

@@ -3,13 +3,14 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Button
 
 
-def pointpicker(image,points):
+def pointpicker(image,points, knownsources):
     plt.close()
     fig, ax = plt.subplots()
 
     plt.subplots_adjust(bottom=0.2)
 
     ax.imshow(image)
+    ax.scatter(knownsources[:,0],knownsources[:,1],c="white")
 
     red = (1,0,0,1)
     green = (0,1,0,1)
@@ -48,7 +49,7 @@ def pointpicker(image,points):
     bpoint = Button(axpoint, 'Point')
     bpoint.on_clicked(point)
     axmul = plt.axes([0.61, 0.05, 0.1, 0.075])
-    bmul = Button(axmul, 'Mutli')
+    bmul = Button(axmul, 'Multi')
     bmul.on_clicked(multi)
 
     l = ax.scatter(points[:,0],points[:,1],c=c,picker=True)

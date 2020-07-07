@@ -2,7 +2,7 @@ import numpy as np
 from astropy.visualization.lupton_rgb import LinearMapping, AsinhMapping
 import matplotlib.pyplot as plt
 from .component import ComponentTree
-
+from .color_tools import spectrum_to_rgb
 
 def channels_to_rgb(channels):
     """Get the linear mapping of multiple channels to RGB channels
@@ -137,8 +137,31 @@ def img_to_3channel(img, channel_map=None, fill_value=0):
 
     if hasattr(rgb, "mask"):
         rgb = rgb.filled(fill_value)
-
     return rgb
+def cube_to_rgb(cube, wl,norm=None):
+    """Convert cube to normalized RGB.
+    If normalized values are outside of the range [0..255], they will be
+    truncated such as to preserve the corresponding color.
+    Parameters
+    ----------
+    cube: array_like
+        This should be an array with dimensions (wl, height, width).
+    wl: array_like
+        Wavelength mapping with dimensions (wl)
+    Returns
+    -------
+    rgb: numpy array with dimensions (3, height, width) and dtype uint8
+    """
+    rgb = spectrum_to_rgb(wl,cube)
+    if norm is None:
+        norm = LinearMapping(image=rgb)
+    r=rgb[:,:,0]
+    g=rgb[:,:,1]
+    b=rgb[:,:,2]
+    rgb = norm.make_rgb_image(r,g,b)
+    return rgb
+
+
 
 
 def img_to_rgb(img, channel_map=None, fill_value=0, norm=None, mask=None):
