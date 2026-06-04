@@ -1,8 +1,8 @@
 # Project Plan — Whole-Cube Self-Similar Deblending of JWST IFU Cubes
 ### (color + morphology self-similarity; point-source/host separation, kinematics later)
 
-**For:** [Postdoc name]
-**PI/supervisor:** [Your name]
+**For:** Kirsty Taggart
+**PI/supervisor:** Maria Jose Bustamante Rosell
 **Horizon:** 2 years · **Year 1:** method paper + released tool · **Year 2:** science application + extensions
 **Your profile (assumed):** strong on IFU/AGN/kinematics science; ramping up on JAX / autodiff /
 proximal optimization. The reading list and early milestones reflect that.
