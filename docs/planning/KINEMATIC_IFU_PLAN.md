@@ -5,6 +5,27 @@ host's kinematics, across the full JWST IFU cube**, using scarlet-style **exact 
 constraints** on a **differentiable forward model**. No neural prior. No nucleus masking.
 
 ## Why this project exists (the gap)
+
+**Core idea (lead with this):** a source is *self-similar* — **one SED across all wavelengths, one
+morphology across all spaxels**. Existing IFU codes don't use this for deblending: **per-slice**
+deblenders fit each wavelength independently (waste color self-similarity); **per-spaxel** spectral
+fitters fit each pixel independently (waste morphology self-similarity); kinematic forward-models use
+shape consistency but are **single-source and mask the nucleus**. spaxlet brings scarlet's whole-cube
+color+morphology self-similarity (constrained matrix factorization) to IFU deblending **for the first
+time**, with **exact constraints** (no soft penalties, no trained prior). The IFU amplifies it: ~1000s
+of channels make each SED a near-unique fingerprint that ~5 broadband colors blur away.
+
+**The math — "low-rank → low-parameter":** without kinematics each source is a clean rank-1 **outer
+product** `S(λ) ⊗ M(x,y)` (linear, cheap — the self-similarity). A velocity field entangles λ and
+(x,y): `source = M(x,y)·T(λ; v(x,y), σ(x,y))`, which is **no longer rank-1 / not an outer product**.
+We reparametrize the line as one morphology × a shifted/broadened template controlled by scalar maps
+(disk → ~6 params) — trading *low-rank* for *low-parameter*. The continuum host and point source stay
+clean outer products; only the line, over its narrow window, is nonlinear. **VarPro** keeps the
+closed-form linear solve for the amplitude/morphology block and does nonlinear opt only on the
+velocity geometry. (This is also *why deferring kinematics is clean:* M1 is the pure outer-product
+factorization; kinematics is a small, contained nonlinear perturbation on one component.)
+
+### The competing tools
 - **GalPaK³ᴰ / ³ᴰBarolo / qubefit**: fit host kinematics in a cube, but **mask the nucleus** —
   cannot handle a bright central point source.
 - **Vietri+ 2024 (arXiv:2411.13270)**: deblend AGN/host **per wavelength slice, independently** —

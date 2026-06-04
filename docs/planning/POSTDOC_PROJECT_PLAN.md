@@ -10,13 +10,21 @@ proximal optimization. The reading list and early milestones reflect that.
 
 ## 1. The one-paragraph pitch
 
-JWST IFU cubes let us study the host galaxies of bright central point sources — AGN and
-supernovae. But existing tools force a bad choice: kinematics codes (GalPaK³ᴰ, ³ᴰBarolo)
-**mask the nucleus**, throwing away exactly the central region where AGN-driven kinematics live;
-AGN–host deblenders work **one wavelength slice at a time** with **no kinematic model**. We will
-build the first tool that **simultaneously (a) deblends the central PSF point source and (b) fits
-the host's kinematic disk model across the full cube** — recovering the nuclear region others
-discard. The engine combines a **differentiable (autodiff) forward model** of the cube with
+A source is **self-similar**: it has *one* spectral energy distribution across all wavelengths and
+*one* morphology across all spaxels. Existing IFU codes do not exploit this for deblending —
+**per-slice** deblenders fit each wavelength independently (discarding color self-similarity),
+**per-spaxel** spectral fitters fit each pixel independently (discarding morphology self-similarity),
+and kinematic forward-models (GalPaK³ᴰ, ³ᴰBarolo) use spatial consistency but assume a *single*
+source and **mask the bright nucleus** — the region of greatest interest. We bring scarlet's
+whole-cube **color-and-morphology self-similarity** (constrained matrix factorization) to IFU
+deblending **for the first time**, with **exact physical constraints** (not soft penalties, not a
+trained prior). An IFU makes it far more powerful than broadband: ~1000s of channels turn each
+source's SED into a near-unique *fingerprint* that ~5 broadband colors blur away, so overlapping
+sources become well-posed to separate. Because the model is self-consistent across the whole cube it
+can **hold the nucleus in place instead of masking it**, and it **extends to kinematics** by letting
+the otherwise-consistent emission line be shifted by a velocity field — recovering the nuclear
+rotation that masking-based tools discard. SN/AGN-in-host is the *application*; the *method gap* is
+the headline. The engine combines a **differentiable (autodiff) forward model** of the cube with
 **scarlet-style exact proximal constraints**, which break the morphological degeneracies that
 limit current soft-fitting methods (a documented failure mode of Sérsic decompositions).
 
