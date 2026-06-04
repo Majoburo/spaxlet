@@ -5,8 +5,9 @@ but read **this** first.
 
 ## What we're building (one sentence)
 
-**spaxlet** separates a bright point source (a supernova or AGN) from its host galaxy
-in a JWST IFU data cube — and, later, also fits the host's rotation.
+**spaxlet** uses a source's **color + shape self-similarity** to separate a bright point source
+(a supernova or AGN) from its host galaxy in a JWST IFU data cube — and, later, also fits the
+host's rotation.
 
 ## Why it's worth doing (the method gap)
 
