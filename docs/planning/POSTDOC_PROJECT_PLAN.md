@@ -1,7 +1,8 @@
-# Project Plan — Joint Deblending + Kinematic Forward Modeling of JWST IFU Cubes
+# Project Plan — Whole-Cube Self-Similar Deblending of JWST IFU Cubes
+### (color + morphology self-similarity; point-source/host separation, kinematics later)
 
-**For:** [Postdoc name]
-**PI/supervisor:** [Your name]
+**For:** Kirsty Taggart
+**PI/supervisor:** Maria Jose Bustamante Rosell
 **Horizon:** 2 years · **Year 1:** method paper + released tool · **Year 2:** science application + extensions
 **Your profile (assumed):** strong on IFU/AGN/kinematics science; ramping up on JAX / autodiff /
 proximal optimization. The reading list and early milestones reflect that.
@@ -10,27 +11,37 @@ proximal optimization. The reading list and early milestones reflect that.
 
 ## 1. The one-paragraph pitch
 
-JWST IFU cubes let us study the host galaxies of bright central point sources — AGN and
-supernovae. But existing tools force a bad choice: kinematics codes (GalPaK³ᴰ, ³ᴰBarolo)
-**mask the nucleus**, throwing away exactly the central region where AGN-driven kinematics live;
-AGN–host deblenders work **one wavelength slice at a time** with **no kinematic model**. We will
-build the first tool that **simultaneously (a) deblends the central PSF point source and (b) fits
-the host's kinematic disk model across the full cube** — recovering the nuclear region others
-discard. The engine combines a **differentiable (autodiff) forward model** of the cube with
+A source is **self-similar**: it has *one* spectral energy distribution across all wavelengths and
+*one* morphology across all spaxels. Existing IFU codes do not exploit this for deblending —
+**per-slice** deblenders fit each wavelength independently (discarding color self-similarity),
+**per-spaxel** spectral fitters fit each pixel independently (discarding morphology self-similarity),
+and kinematic forward-models (GalPaK³ᴰ, ³ᴰBarolo) use spatial consistency but assume a *single*
+source and **mask the bright nucleus** — the region of greatest interest. We bring scarlet's
+whole-cube **color-and-morphology self-similarity** (constrained matrix factorization) to IFU
+deblending **for the first time**, with **exact physical constraints** (not soft penalties, not a
+trained prior). An IFU makes it far more powerful than broadband: ~1000s of channels turn each
+source's SED into a near-unique *fingerprint* that ~5 broadband colors blur away, so overlapping
+sources become well-posed to separate. Because the model is self-consistent across the whole cube it
+can **hold the nucleus in place instead of masking it**, and it **extends to kinematics** by letting
+the otherwise-consistent emission line be shifted by a velocity field — recovering the nuclear
+rotation that masking-based tools discard. SN/AGN-in-host is the *application*; the *method gap* is
+the headline. The engine combines a **differentiable (autodiff) forward model** of the cube with
 **scarlet-style exact proximal constraints**, which break the morphological degeneracies that
 limit current soft-fitting methods (a documented failure mode of Sérsic decompositions).
 
 ## 2. Why it's novel (the gap — verified against the literature)
 
-| Existing tool | Deblends point source? | Kinematics? | Whole-cube joint fit? | Exact constraints? |
-|---|---|---|---|---|
-| GalPaK³ᴰ / ³ᴰBarolo / qubefit | ❌ (masks nucleus) | ✅ disk | ✅ | ❌ (MCMC) |
-| Vietri+ 2024 (2411.13270) | ✅ | ❌ | ❌ (per-slice) | ❌ |
-| Li+ 2025 JWST (2510.27214) | ✅ | ❌ | ❌ (2D image) | ❌ |
-| RUBIX (2412.08265) | ❌ (it's a simulator) | sim only | n/a | ❌ |
-| **This project** | ✅ | ✅ disk | ✅ | ✅ proximal |
+| Existing tool | Uses color self-similarity? | Uses shape self-similarity? | Deblends point source? | Kinematics? | Exact constraints? |
+|---|---|---|---|---|---|
+| GalPaK³ᴰ / ³ᴰBarolo / qubefit | ✅ | ✅ | ❌ (masks nucleus) | ✅ disk | ❌ (MCMC) |
+| Vietri+ 2024 (2411.13270) | ❌ (per-slice) | ✅ | ✅ | ❌ | ❌ |
+| Li+ 2025 JWST (2510.27214) | ❌ (1 band) | ✅ | ✅ | ❌ | ❌ |
+| per-spaxel fitters (pPXF-style) | ✅ | ❌ (per-spaxel) | ❌ | ✅ | ❌ |
+| **This project (spaxlet)** | ✅ | ✅ | ✅ | ✅ disk | ✅ proximal |
 
-**The joint deblend + kinematics with hard constraints is unoccupied.** That's our contribution.
+**No existing IFU code uses BOTH color and morphology self-similarity to deblend across the whole
+cube with exact constraints.** That joint, whole-cube self-similarity is our contribution — the
+deblend is the foundation, kinematics is the extension.
 
 ---
 
@@ -78,7 +89,7 @@ The first item is the most important — it's our intended mechanism for the joi
   sound, and as an optional future door (a data-driven prior that keeps convergence guarantees).*
 
 ### Tier C — JWST instrument reality (read by Stage 3)
-10. **NIRSpec IFU** docs (JWST User Docs) + **Böker et al. 2022** (NIRSpec IFU, arXiv:2202.xxxx).
+10. **NIRSpec IFU** docs (JWST User Docs) + **Böker et al. 2022** (NIRSpec IFU; arXiv:2202.03308, A&A 661, A82).
 11. **MIRI MRS** docs + **Law et al. 2023** 3D-drizzle (arXiv:2306.05520) — cube build & correlated noise.
 12. **WebbPSF** docs — per-channel PSF model generation.
 
