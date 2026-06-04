@@ -89,7 +89,7 @@ The first item is the most important — it's our intended mechanism for the joi
   sound, and as an optional future door (a data-driven prior that keeps convergence guarantees).*
 
 ### Tier C — JWST instrument reality (read by Stage 3)
-10. **NIRSpec IFU** docs (JWST User Docs) + **Böker et al. 2022** (NIRSpec IFU, arXiv:2202.xxxx).
+10. **NIRSpec IFU** docs (JWST User Docs) + **Böker et al. 2022** (NIRSpec IFU; arXiv:2202.03308, A&A 661, A82).
 11. **MIRI MRS** docs + **Law et al. 2023** 3D-drizzle (arXiv:2306.05520) — cube build & correlated noise.
 12. **WebbPSF** docs — per-channel PSF model generation.
 
