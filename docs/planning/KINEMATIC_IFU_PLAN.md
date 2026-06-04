@@ -1,8 +1,10 @@
-# Kinematic IFU Deblender for JWST — Staged Build Plan
+# spaxlet — Whole-Cube Self-Similar Deblending of JWST IFU Cubes — Staged Build Plan
 
-A tool to **jointly deblend a central point source (SN/AGN) from its host AND fit the
-host's kinematics, across the full JWST IFU cube**, using scarlet-style **exact proximal
-constraints** on a **differentiable forward model**. No neural prior. No nucleus masking.
+A tool that exploits a source's **color + morphology self-similarity** (one SED across all
+wavelengths, one shape across all spaxels) to **deblend a central point source (SN/AGN) from its
+host across the full JWST IFU cube** — and, as an extension, fit the host's **kinematics**. Built on
+scarlet-style **exact proximal constraints** over a **differentiable forward model**. No neural
+prior. No nucleus masking.
 
 ## Why this project exists (the gap)
 

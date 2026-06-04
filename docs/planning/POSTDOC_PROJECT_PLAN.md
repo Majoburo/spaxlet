@@ -1,4 +1,5 @@
-# Project Plan — Joint Deblending + Kinematic Forward Modeling of JWST IFU Cubes
+# Project Plan — Whole-Cube Self-Similar Deblending of JWST IFU Cubes
+### (color + morphology self-similarity; point-source/host separation, kinematics later)
 
 **For:** [Postdoc name]
 **PI/supervisor:** [Your name]
@@ -30,15 +31,17 @@ limit current soft-fitting methods (a documented failure mode of Sérsic decompo
 
 ## 2. Why it's novel (the gap — verified against the literature)
 
-| Existing tool | Deblends point source? | Kinematics? | Whole-cube joint fit? | Exact constraints? |
-|---|---|---|---|---|
-| GalPaK³ᴰ / ³ᴰBarolo / qubefit | ❌ (masks nucleus) | ✅ disk | ✅ | ❌ (MCMC) |
-| Vietri+ 2024 (2411.13270) | ✅ | ❌ | ❌ (per-slice) | ❌ |
-| Li+ 2025 JWST (2510.27214) | ✅ | ❌ | ❌ (2D image) | ❌ |
-| RUBIX (2412.08265) | ❌ (it's a simulator) | sim only | n/a | ❌ |
-| **This project** | ✅ | ✅ disk | ✅ | ✅ proximal |
+| Existing tool | Uses color self-similarity? | Uses shape self-similarity? | Deblends point source? | Kinematics? | Exact constraints? |
+|---|---|---|---|---|---|
+| GalPaK³ᴰ / ³ᴰBarolo / qubefit | ✅ | ✅ | ❌ (masks nucleus) | ✅ disk | ❌ (MCMC) |
+| Vietri+ 2024 (2411.13270) | ❌ (per-slice) | ✅ | ✅ | ❌ | ❌ |
+| Li+ 2025 JWST (2510.27214) | ❌ (1 band) | ✅ | ✅ | ❌ | ❌ |
+| per-spaxel fitters (pPXF-style) | ✅ | ❌ (per-spaxel) | ❌ | ✅ | ❌ |
+| **This project (spaxlet)** | ✅ | ✅ | ✅ | ✅ disk | ✅ proximal |
 
-**The joint deblend + kinematics with hard constraints is unoccupied.** That's our contribution.
+**No existing IFU code uses BOTH color and morphology self-similarity to deblend across the whole
+cube with exact constraints.** That joint, whole-cube self-similarity is our contribution — the
+deblend is the foundation, kinematics is the extension.
 
 ---
 
