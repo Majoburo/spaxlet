@@ -8,15 +8,25 @@ but read **this** first.
 **spaxlet** separates a bright point source (a supernova or AGN) from its host galaxy
 in a JWST IFU data cube — and, later, also fits the host's rotation.
 
-## Why it's worth doing
+## Why it's worth doing (the method gap)
 
-Existing tools force a bad trade-off: kinematics codes **throw away the bright nucleus**
-(they mask it), and AGN/host deblenders **ignore the spectrum's velocity information**.
-We do both at once, in one fit. Nobody has. (Details + papers to cite: `docs/planning/`.)
+A source is **self-similar**: it has *one* spectrum (color) across all wavelengths and *one*
+shape (morphology) across all spaxels. The existing IFU codes don't use this for deblending:
+- **per-slice** deblenders fit each wavelength on its own → waste the *color* self-similarity;
+- **per-spaxel** spectral fitters fit each pixel on its own → waste the *shape* self-similarity;
+- **kinematics codes** use the shape, but only for *one* source, and **mask the bright nucleus**.
+
+We're the **first to bring whole-cube color+shape self-similarity to IFU deblending** (this is
+scarlet's idea, never applied to IFUs). An IFU makes it powerful: ~1000s of channels turn each
+source's spectrum into a near-unique *fingerprint* that ~5 broadband colors blur away. Because the
+model is consistent across the whole cube, we can **keep the nucleus instead of masking it** — and
+later add rotation by letting the (otherwise consistent) line shift with a velocity field.
+SN/AGN-in-host is the *application*; the *method gap* is the headline. (Papers to cite: `docs/planning/`.)
 
 ## The core idea (what makes us different)
 
-We model the cube as a **sum of components** — `point source + host` — and fit them by
+We model the cube as a **sum of components** — `point source + host` — where each component is
+**self-similar**: one spectrum × one shape (a clean "outer product"). We fit them by
 **proximal gradient**:
 
 ```
