@@ -20,6 +20,25 @@ def _constraint_center(shape, center):
     return center
 
 
+def _shifted_center(center, offset, *, integer):
+    if center is None:
+        return None
+    if len(offset) != len(center) or not np.all(np.isfinite(offset)):
+        raise ValueError("a coordinate shift must match the center and be finite")
+    if integer:
+        resolved = tuple(int(delta) for delta in offset)
+        if any(float(delta) != value for delta, value in zip(offset, resolved)):
+            raise ValueError("an integer pixel center requires an integer shift")
+        return tuple(
+            int(coordinate) + delta
+            for coordinate, delta in zip(center, resolved)
+        )
+    return tuple(
+        float(coordinate) + float(delta)
+        for coordinate, delta in zip(center, offset)
+    )
+
+
 class Constraint:
     """Constraint base class
 
@@ -69,6 +88,16 @@ class Constraint:
             return self.f(X, step)
         return X
 
+    def shifted(self, offset):
+        """Return the equivalent constraint after a coordinate-grid shift.
+
+        Constraints without spatial coordinates are invariant and return
+        themselves. Coordinate-bearing subclasses rebuild their cached
+        geometry around the shifted local center.
+        """
+
+        return self
+
 
 class ConstraintChain:
     """An ordered list of `Constraint`s.
@@ -93,6 +122,15 @@ class ConstraintChain:
             for c in self.constraints:
                 X = c(X, step)
         return X
+
+    def shifted(self, offset):
+        constraints = tuple(
+            constraint.shifted(offset)
+            if hasattr(constraint, "shifted")
+            else constraint
+            for constraint in self.constraints
+        )
+        return ConstraintChain(*constraints, repeat=self.repeat)
 
 
 class DykstraConstraintChain(ConstraintChain):
@@ -172,6 +210,17 @@ class DykstraConstraintChain(ConstraintChain):
 
         raise RuntimeError(
             "Dykstra projection did not converge in {} sweeps".format(self.max_iter)
+        )
+
+    def shifted(self, offset):
+        constraints = tuple(
+            constraint.shifted(offset) for constraint in self.constraints
+        )
+        return DykstraConstraintChain(
+            *constraints,
+            max_iter=self.max_iter,
+            rtol=self.rtol,
+            atol=self.atol
         )
 
 
@@ -332,6 +381,16 @@ class MonotonicityConstraint(Constraint):
 
         return result
 
+    def shifted(self, offset):
+        center = _shifted_center(self.center, offset, integer=True)
+        return MonotonicityConstraint(
+            neighbor_weight=self.neighbor_weight,
+            min_gradient=self.min_gradient,
+            use_mask=self.use_mask,
+            fit_center_radius=self.fit_center_radius,
+            center=center,
+        )
+
 
 class MonotonicMaskConstraint(Constraint):
     """Make morphology monotonic by branching from the center
@@ -356,6 +415,15 @@ class MonotonicMaskConstraint(Constraint):
         else:
             morph = np.array([self.prox(morph_, step)[1] for morph_ in morph])
         return morph
+
+    def shifted(self, offset):
+        center = _shifted_center(self.center, offset, integer=True)
+        return MonotonicMaskConstraint(
+            center,
+            center_radius=self.center_radius,
+            variance=self.variance,
+            max_iter=self.max_iter,
+        )
 
 
 class SymmetryConstraint(Constraint):
@@ -388,6 +456,10 @@ class SymmetryConstraint(Constraint):
             )
         return operator.prox_soft_symmetry(morph, step, strength=self.strength)
 
+    def shifted(self, offset):
+        center = _shifted_center(self.center, offset, integer=True)
+        return SymmetryConstraint(strength=self.strength, center=center)
+
 
 class CenterOnConstraint(Constraint):
     """Sets the center pixel to a tiny non-zero value
@@ -404,6 +476,10 @@ class CenterOnConstraint(Constraint):
         center = _constraint_center(shape, self.center)
         morph[center] = max(morph[center], self.tiny)
         return morph
+
+    def shifted(self, offset):
+        center = _shifted_center(self.center, offset, integer=True)
+        return CenterOnConstraint(tiny=self.tiny, center=center)
 
 
 class CentroidConstraint(Constraint):
@@ -451,6 +527,11 @@ class CentroidConstraint(Constraint):
         flat = value.reshape(-1)
         correction = design.T @ gram_inverse @ (design @ flat)
         return (flat - correction).reshape(value.shape)
+
+    def shifted(self, offset):
+        return CentroidConstraint(
+            _shifted_center(self.center, offset, integer=False)
+        )
 
 
 class LeakyConstraint(Constraint):
