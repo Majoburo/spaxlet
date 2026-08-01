@@ -5,10 +5,17 @@ six-channel end-to-end feature matrix before production behavior is changed.
 They include a compatible null, a close smooth blend, and a deliberately
 clumpy negative control.
 
+`ifu_parity_metrics.py` is the shared scoring boundary. It reports
+scale-sensitive integrated and binned spectral errors, unit-flux morphology
+errors (including centroid and one-/two-pixel structured residuals), observable
+whitened residual diagnostics, and pairwise start sensitivity. Both codes must
+pass plain arrays through these functions; code-specific scoring is not used
+for promotion decisions.
+
 Run Scarlet's local contract tests:
 
 ```bash
-python -m unittest discover -s tests -p 'test_ifu_parity_contracts.py'
+python -m unittest discover -s tests -p 'test_ifu_parity_*.py'
 ```
 
 Run both repositories through the existing comparison drivers:
