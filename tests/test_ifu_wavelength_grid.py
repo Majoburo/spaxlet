@@ -3,6 +3,7 @@
 import unittest
 
 import numpy as np
+from autograd import grad
 from astropy import units as u
 
 import scarlet
@@ -53,6 +54,59 @@ class IFUWavelengthGridTest(unittest.TestCase):
             psf=frame.psf,
         )
         self.assertIs(observation.match(frame).model_frame, frame)
+
+    def test_noncontiguous_subset_maps_model_and_psf_channels(self):
+        model_psfs = np.zeros((4, 3, 3), dtype=float)
+        observed_psfs = np.zeros((2, 3, 3), dtype=float)
+        for index in range(4):
+            model_psfs[index, 1, 1] = 1
+            model_psfs[index, 1, 0] = 0.05 * index
+        for index in range(2):
+            observed_psfs[index, 1, 1] = 1
+            observed_psfs[index, 0, 1] = 0.1 * (index + 1)
+
+        full_frame = scarlet.Frame(
+            (4, 5, 7),
+            channels=["a", "b", "c", "d"],
+            psf=scarlet.ImagePSF(model_psfs.copy()),
+            wavelengths=np.array([1.0, 1.1, 1.2, 1.3]) * u.um,
+        )
+        observation = self._observation(
+            np.array([1.0, 1.2]) * u.um,
+            channels=["a", "c"],
+            psf=scarlet.ImagePSF(observed_psfs.copy()),
+        ).match(full_frame)
+
+        subset_frame = scarlet.Frame(
+            (2, 5, 7),
+            channels=["a", "c"],
+            psf=scarlet.ImagePSF(model_psfs[[0, 2]].copy()),
+            wavelengths=np.array([1.0, 1.2]) * u.um,
+        )
+        reference = self._observation(
+            np.array([1.0, 1.2]) * u.um,
+            channels=["a", "c"],
+            psf=scarlet.ImagePSF(observed_psfs.copy()),
+        ).match(subset_frame)
+
+        model = np.arange(4 * 5 * 7, dtype=float).reshape(4, 5, 7)
+        np.testing.assert_allclose(
+            observation.render(model),
+            reference.render(model[[0, 2]]),
+            rtol=0,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            observation.renderer.render_channels(model, 0, 1),
+            reference.renderer.render_channels(model[[0, 2]], 0, 1),
+            rtol=0,
+            atol=1e-12,
+        )
+        gradient = grad(lambda value: np.sum(observation.render(value)))(model)
+        self.assertTrue(np.any(gradient[0] != 0))
+        self.assertTrue(np.all(gradient[1] == 0))
+        self.assertTrue(np.any(gradient[2] != 0))
+        self.assertTrue(np.all(gradient[3] == 0))
 
     def test_one_sided_wavelength_metadata_is_rejected(self):
         frame = self._frame(np.array([1.0, 1.1, 1.2]) * u.um)

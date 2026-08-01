@@ -80,7 +80,22 @@ class Renderer(Model):
             return model
         if isinstance(self.channel_map, slice):
             return model[self.channel_map]
-        return np.dot(self.channel_map, model)
+        return model[self.channel_map]
+
+    def map_model_psf_channels(self, psf):
+        """Select model PSFs on the observation's channel grid.
+
+        A singleton PSF is shared by every channel. Otherwise the PSF must
+        declare one image per model-frame channel and follows the same channel
+        mapping as the model cube.
+        """
+        if psf.shape[0] == 1:
+            return psf
+        if psf.shape[0] != self.model_frame.C:
+            raise ValueError(
+                "model PSF must have one channel or match the model frame"
+            )
+        return self.map_channels(psf)
 
     def render_channels(self, model, start, stop, *parameters):
         """Render a contiguous block of observation channels.
@@ -212,9 +227,8 @@ class ConvolutionRenderer(Renderer):
 
         # construct diff kernel
         psf_fft = fft.Fourier(data_frame.psf.get_model().astype(model_frame.dtype))
-        model_psf_fft = fft.Fourier(
-            model_frame.psf.get_model().astype(model_frame.dtype)
-        )
+        model_psf = self.map_model_psf_channels(model_frame.psf.get_model())
+        model_psf_fft = fft.Fourier(model_psf.astype(model_frame.dtype))
         self.diff_kernel = fft.match_psf(psf_fft, model_psf_fft, padding=padding)
 
     @property
@@ -426,7 +440,7 @@ class ResolutionRenderer(Renderer):
         wcs_lr = data_frame.wcs
 
         # PSF models
-        psf_hr = model_frame.psf.get_model()
+        psf_hr = self.map_model_psf_channels(model_frame.psf.get_model())
         psf_lr = data_frame.psf.get_model().astype(model_frame.dtype)
 
         # Computes spatially matching observation and model psf. The observation psf is also resampled \\
