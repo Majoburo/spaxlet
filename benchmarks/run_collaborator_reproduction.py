@@ -23,7 +23,6 @@ from astropy import units as u
 from astropy.io import fits
 
 from benchmarks.ifu_parity_metrics import morphology_metrics, residual_metrics, spectral_metrics
-from lisasep import crop_psf_kernels, recenter_psf_kernels
 
 
 READ_VARIANCE = 0.000880653
@@ -127,8 +126,8 @@ def main():
         raise ValueError("PSF and science cube must share the spectral grid")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        kernels, retained_flux = crop_psf_kernels(kernels, args.kernel_size)
-    kernels, removed_shift = recenter_psf_kernels(kernels)
+        kernels, retained_flux = scarlet.crop_psf_kernels(kernels, args.kernel_size)
+    kernels, removed_shift = scarlet.recenter_psf_kernels(kernels)
     kernels = np.asarray(kernels, dtype=fit_dtype)
     _memory_checkpoint("corrected_psf", args.profile_memory)
 

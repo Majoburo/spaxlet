@@ -22,6 +22,7 @@ from .degeneracy import (
     pairwise_mixing_envelopes,
 )
 from .frame import Frame
+from .ifu import crop_psf_kernels, psf_centroids, recenter_psf_kernels
 from .morphology import (
     Morphology,
     ImageMorphology,
