@@ -144,7 +144,9 @@ class Observation(Frame):
         """
         return self.renderer(model, *parameters)
 
-    def get_log_likelihood(self, model, *parameters, noise_factor=0):
+    def get_log_likelihood(
+        self, model, *parameters, noise_factor=0, channel_chunk_size=None
+    ):
         """Computes the log-Likelihood of a given model wrt to the observation
 
         Parameters
@@ -152,12 +154,15 @@ class Observation(Frame):
         model: array
             The model from `Blend`
         parameters: tuple of optimization parameters
+        channel_chunk_size: int or None
+            If set, render and score this many adjacent observation channels
+            at a time. This reduces peak memory for large IFU cubes when the
+            renderer supports channel chunking.
 
         Returns
         -------
         logL: float
         """
-        model_ = self.render(model, *parameters)
         data_ = self.data
         weights_ = self.weights
 
@@ -167,7 +172,25 @@ class Observation(Frame):
             data_ = data_ + noise
             weights_ = weights_ / (noise_factor + 1)
 
-        return -self.log_norm - np.sum(weights_ * (model_ - data_) ** 2) / 2
+        if channel_chunk_size is None:
+            model_ = self.render(model, *parameters)
+            squared_error = np.sum(weights_ * (model_ - data_) ** 2)
+        else:
+            if not isinstance(channel_chunk_size, (int, np.integer)):
+                raise TypeError("channel_chunk_size must be an integer or None")
+            if channel_chunk_size <= 0:
+                raise ValueError("channel_chunk_size must be positive")
+            squared_error = 0.0
+            for start in range(0, self.shape[0], channel_chunk_size):
+                stop = min(start + channel_chunk_size, self.shape[0])
+                model_ = self.renderer.render_channels(
+                    model, start, stop, *parameters
+                )
+                squared_error = squared_error + np.sum(
+                    weights_[start:stop] * (model_ - data_[start:stop]) ** 2
+                )
+
+        return -self.log_norm - squared_error / 2
 
     @property
     def log_norm(self):

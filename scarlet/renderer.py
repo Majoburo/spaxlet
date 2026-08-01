@@ -82,6 +82,19 @@ class Renderer(Model):
             return model[self.channel_map]
         return np.dot(self.channel_map, model)
 
+    def render_channels(self, model, start, stop, *parameters):
+        """Render a contiguous block of observation channels.
+
+        Renderers that can avoid materializing the full observation model
+        override this method. The base implementation is deliberately absent
+        so callers never silently assume that a renderer is memory bounded.
+        """
+        raise NotImplementedError(
+            "{} does not support channel-chunked rendering".format(
+                type(self).__name__
+            )
+        )
+
 
 class NullRenderer(Renderer):
     def __init__(self, data_frame, model_frame):
@@ -92,6 +105,9 @@ class NullRenderer(Renderer):
             return model
 
         return nothing
+
+    def render_channels(self, model, start, stop, *parameters):
+        return self.map_channels(model)[start:stop]
 
 
 @primitive
@@ -212,21 +228,23 @@ class ConvolutionRenderer(Renderer):
             )
         return self._convolution_bounds
 
-    def convolve(self, model, convolution_type=None, psf_shift=None):
+    def convolve(
+        self, model, convolution_type=None, psf_shift=None, kernel=None
+    ):
         """Convolve the model in a single band
         """
         if convolution_type is None:
             convolution_type = self._convolution_type
+        if kernel is None:
+            kernel = self.diff_kernel.image
         if psf_shift is not None:
             kernel = fft.shift(
-                self.diff_kernel.image,
+                kernel,
                 psf_shift,
                 fft_shape=None,
                 axes=(-2, -1),
                 return_Fourier=True,
             )
-        else:
-            kernel = self.diff_kernel.image
         if convolution_type == "real":
             result = convolve(model, kernel, self.convolution_bounds)
         elif convolution_type == "fft":
@@ -239,6 +257,35 @@ class ConvolutionRenderer(Renderer):
             )
 
         return result
+
+    def render_channels(self, model, start, stop, *parameters):
+        """Render channels without allocating a full convolved cube.
+
+        This bounded-memory path currently requires aligned spatial frames,
+        which is the common IFU case. Spectral channel selection is applied
+        before convolution, and the corresponding difference kernels are
+        sliced to the same block.
+        """
+        if self.data_frame.shape[1:] != self.model_frame.shape[1:]:
+            raise NotImplementedError(
+                "channel chunking requires matching spatial frame shapes"
+            )
+        data_slices, model_slices = self.slices
+        for axis in (-2, -1):
+            data_length = data_slices[axis].stop - data_slices[axis].start
+            model_length = model_slices[axis].stop - model_slices[axis].start
+            if (
+                data_length != self.data_frame.shape[axis]
+                or model_length != self.model_frame.shape[axis]
+            ):
+                raise NotImplementedError(
+                    "channel chunking requires aligned spatial frame bounds"
+                )
+
+        model_ = self.map_channels(model)[start:stop]
+        shift = self.get_parameter("psf_shift", *parameters)
+        kernel = self.diff_kernel.image[start:stop]
+        return self.convolve(model_, psf_shift=shift, kernel=kernel)
 
     def __call__(self, model, *parameters):
         self.transform = self.get_model(*parameters)

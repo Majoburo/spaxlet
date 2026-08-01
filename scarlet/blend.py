@@ -89,6 +89,7 @@ class Blend(CombinedComponent):
         min_iter=1,
         noise_factor=0,
         project_initial=False,
+        channel_chunk_size=None,
         **alg_kwargs
     ):
         """Fit the model for each source to the data
@@ -109,9 +110,18 @@ class Blend(CombinedComponent):
             caller-supplied factors: an infeasible start can otherwise create
             a large first proximal jump unrelated to the gradient. The default
             is ``False`` for backward compatibility.
+        channel_chunk_size: int or None
+            Render and score this many observation channels at a time. This
+            lowers peak memory for compatible renderers without changing the
+            objective.
         """
         if not isinstance(project_initial, (bool, np.bool_)):
             raise TypeError("project_initial must be boolean")
+        if channel_chunk_size is not None:
+            if not isinstance(channel_chunk_size, (int, np.integer)):
+                raise TypeError("channel_chunk_size must be an integer or None")
+            if channel_chunk_size <= 0:
+                raise ValueError("channel_chunk_size must be positive")
         self.initial_projection_relative_l2 = 0.0
         if project_initial:
             parameters = self.parameters + tuple(
@@ -138,6 +148,7 @@ class Blend(CombinedComponent):
             )
         it = 0
         self._noise_factor = noise_factor
+        self._channel_chunk_size = channel_chunk_size
         while it < max_iter:
             try:
                 X = self.parameters + tuple(
@@ -306,7 +317,10 @@ class Blend(CombinedComponent):
             n_obs_params = len(observation.parameters)
             obs_params = parameters[n_params : n_params + n_obs_params]
             total_loss = total_loss - observation.get_log_likelihood(
-                model, *obs_params, noise_factor=self._noise_factor
+                model,
+                *obs_params,
+                noise_factor=self._noise_factor,
+                channel_chunk_size=self._channel_chunk_size,
             )
             n_params += n_obs_params
 

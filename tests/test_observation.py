@@ -1,4 +1,5 @@
 import numpy as np
+from autograd import grad
 from numpy.testing import assert_array_equal, assert_almost_equal
 from functools import partial
 import scarlet
@@ -76,3 +77,39 @@ class TestObservation(object):
                 pass
             else:
                 raise AssertionError("DeltaPSF accepted invalid channel count")
+
+    def test_channel_chunked_likelihood_and_gradient_match_full_render(self):
+        rng = np.random.RandomState(13)
+        shape = (7, 17, 15)
+        channels = np.arange(shape[0])
+        model_frame = scarlet.Frame(
+            shape,
+            psf=scarlet.DeltaPSF(shape[0], dtype=np.float32),
+            channels=channels,
+            dtype=np.float32,
+        )
+        observation = scarlet.Observation(
+            rng.normal(size=shape).astype(np.float32),
+            psf=scarlet.GaussianPSF(
+                np.linspace(0.7, 1.6, shape[0]), boxsize=9
+            ),
+            weights=rng.uniform(0.2, 1.5, size=shape).astype(np.float32),
+            channels=channels,
+        ).match(model_frame)
+        model = rng.normal(size=shape).astype(np.float32)
+
+        full = observation.get_log_likelihood(model)
+        chunked = observation.get_log_likelihood(model, channel_chunk_size=3)
+        assert_almost_equal(chunked, full, decimal=4)
+
+        full_gradient = grad(
+            lambda value: -observation.get_log_likelihood(value)
+        )(model)
+        chunked_gradient = grad(
+            lambda value: -observation.get_log_likelihood(
+                value, channel_chunk_size=3
+            )
+        )(model)
+        np.testing.assert_allclose(
+            chunked_gradient, full_gradient, rtol=2e-5, atol=2e-5
+        )

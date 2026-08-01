@@ -2,8 +2,38 @@ import operator
 
 import autograd.numpy as np
 from autograd.extend import primitive, defvjp
+from autograd.numpy.fft import get_fftn_args, irfft_grad, rfft_grad
+from scipy import fft as scipy_fft
 from scipy import fftpack
 from .interpolation import mk_shifter
+
+
+@primitive
+def _rfftn(image, s=None, axes=None, norm=None):
+    """Precision-preserving real FFT with an autograd-compatible VJP."""
+
+    return scipy_fft.rfftn(image, s=s, axes=axes, norm=norm)
+
+
+@primitive
+def _irfftn(image_fft, s=None, axes=None, norm=None):
+    """Precision-preserving inverse real FFT with an autograd-compatible VJP."""
+
+    return scipy_fft.irfftn(image_fft, s=s, axes=axes, norm=norm)
+
+
+defvjp(
+    _rfftn,
+    lambda *args, **kwargs: rfft_grad(
+        get_fftn_args, _irfftn, *args, **kwargs
+    ),
+)
+defvjp(
+    _irfftn,
+    lambda *args, **kwargs: irfft_grad(
+        get_fftn_args, _rfftn, *args, **kwargs
+    ),
+)
 
 
 def _centered(arr, newshape):
@@ -232,7 +262,7 @@ class Fourier(object):
         if axes is None:
             axes = range(len(image_fft))
         all_axes = range(len(image_shape))
-        image = np.fft.irfftn(image_fft, fft_shape, axes=axes)
+        image = _irfftn(image_fft, fft_shape, axes=axes)
         # Shift the center of the image from the bottom left to the center
         image = np.fft.fftshift(image, axes=axes)
         # Trim the image to remove the padding added
@@ -269,7 +299,9 @@ class Fourier(object):
                 msg = "fft_shape self.axes must have the same number of dimensions, got {0}, {1}"
                 raise ValueError(msg.format(fft_shape, axes))
             image = _pad(self.image, fft_shape, axes)
-            self._fft[fft_key] = np.fft.rfftn(np.fft.ifftshift(image, axes), axes=axes)
+            self._fft[fft_key] = _rfftn(
+                np.fft.ifftshift(image, axes), axes=axes
+            )
         return self._fft[fft_key]
 
     def __len__(self):

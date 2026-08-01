@@ -10,8 +10,10 @@ catalog-centered A/B/C morphology starts as lisasep.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 from pathlib import Path
+import resource
 import time
 import warnings
 
@@ -37,6 +39,9 @@ def _parser():
     parser.add_argument("--kernel-size", type=int, default=47)
     parser.add_argument("--max-iter", type=int, default=1500)
     parser.add_argument("--relative-tolerance", type=float, default=1e-11)
+    parser.add_argument("--dtype", choices=("float32", "float64"), default="float64")
+    parser.add_argument("--channel-chunk-size", type=int)
+    parser.add_argument("--profile-memory", action="store_true")
     return parser
 
 
@@ -67,13 +72,33 @@ def _jsonable(metrics):
     }
 
 
+def _memory_checkpoint(label, enabled):
+    if not enabled:
+        return
+    gc.collect()
+    current_kib = None
+    for line in Path("/proc/self/status").read_text().splitlines():
+        if line.startswith("VmRSS:"):
+            current_kib = int(line.split()[1])
+            break
+    peak_kib = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    print(
+        "MEMORY {} current={:.1f}MiB peak={:.1f}MiB".format(
+            label, current_kib / 1024.0, peak_kib / 1024.0
+        ),
+        flush=True,
+    )
+
+
 def main():
     args = _parser().parse_args()
+    fit_dtype = np.dtype(args.dtype)
+    _memory_checkpoint("imports", args.profile_memory)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     truth_path = args.data_root / "morphology_galaxy_cube_004.fits"
     psf_path = args.data_root / "nirspec_ifu_PRISM_CLEAR_allwave.cube.fits"
     with fits.open(truth_path) as hdul:
-        data = np.asarray(hdul["SCI"].data, dtype=float)
+        data = np.asarray(hdul["SCI"].data, dtype=fit_dtype)
         table = hdul["TRUTH_SPECTRA"].data
         wavelength = np.asarray(table["wavelength_um"], dtype=float)
         reference_spectra = (
@@ -83,18 +108,25 @@ def main():
         reference_morphologies = np.asarray(
             hdul["TRUTH_MORPHOLOGY"].data, dtype=float
         )
+    _memory_checkpoint("science", args.profile_memory)
     with fits.open(psf_path) as hdul:
-        kernels = np.asarray(hdul["DET_SAMP"].data, dtype=float)
+        kernels = np.asarray(hdul["DET_SAMP"].data, dtype=fit_dtype)
+    _memory_checkpoint("raw_psf", args.profile_memory)
     if kernels.shape[0] != data.shape[0]:
         raise ValueError("PSF and science cube must share the spectral grid")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         kernels, retained_flux = crop_psf_kernels(kernels, args.kernel_size)
     kernels, removed_shift = recenter_psf_kernels(kernels)
+    kernels = np.asarray(kernels, dtype=fit_dtype)
+    _memory_checkpoint("corrected_psf", args.profile_memory)
 
-    variance = READ_VARIANCE + POISSON_COEFFICIENT * np.maximum(data, 0.0)
+    variance = np.asarray(
+        READ_VARIANCE + POISSON_COEFFICIENT * np.maximum(data, 0.0),
+        dtype=fit_dtype,
+    )
     channels = ["ch{:04d}".format(index) for index in range(data.shape[0])]
-    delta_psf = scarlet.DeltaPSF(data.shape[0])
+    delta_psf = scarlet.DeltaPSF(data.shape[0], dtype=fit_dtype)
     frame = scarlet.Frame(data.shape, psf=delta_psf, channels=channels)
     observation = scarlet.Observation(
         data,
@@ -102,12 +134,13 @@ def main():
         weights=1.0 / variance,
         channels=channels,
     ).match(frame)
+    _memory_checkpoint("matched_observation", args.profile_memory)
 
-    rows, columns = np.indices(data.shape[1:], dtype=float)
+    rows, columns = np.indices(data.shape[1:], dtype=fit_dtype)
 
     def blob(center, scale):
         value = np.exp(-np.hypot(rows - center[0], columns - center[1]) / scale)
-        return value / value.sum()
+        return np.asarray(value / value.sum(), dtype=fit_dtype)
 
     scales = START_SCALES[args.start]
     starting_morphologies = [
@@ -115,25 +148,32 @@ def main():
     ]
     sources = []
     for morphology_start in starting_morphologies:
-        spectrum = scarlet.TabulatedSpectrum(frame, np.ones(data.shape[0]))
+        spectrum = scarlet.TabulatedSpectrum(
+            frame, np.ones(data.shape[0], dtype=fit_dtype)
+        )
         morphology = scarlet.ImageMorphology(
             frame, morphology_start.copy(), resizing=False
         )
         sources.append(scarlet.FactorizedComponent(frame, spectrum, morphology))
+    _memory_checkpoint("sources", args.profile_memory)
 
     initial_model = np.asarray(
         observation.render(scarlet.Blend(sources, observation).get_model()),
         dtype=float,
     )
     initial_chi_square = float(np.mean((data - initial_model) ** 2 / variance))
+    del initial_model
+    _memory_checkpoint("initial_model", args.profile_memory)
     blend = scarlet.Blend(sources, observation)
     started = time.perf_counter()
     iterations, log_likelihood = blend.fit(
         args.max_iter,
         e_rel=args.relative_tolerance,
         project_initial=True,
+        channel_chunk_size=args.channel_chunk_size,
     )
     runtime = time.perf_counter() - started
+    _memory_checkpoint("fit", args.profile_memory)
 
     spectra = []
     morphologies = []
@@ -173,6 +213,7 @@ def main():
                 ),
             }
         )
+    _memory_checkpoint("scores", args.profile_memory)
 
     history = np.asarray(blend.log_likelihood, dtype=float)
     relative_change = (
@@ -209,6 +250,8 @@ def main():
             "read_variance": READ_VARIANCE,
             "poisson_coefficient": POISSON_COEFFICIENT,
         },
+        "fit_dtype": args.dtype,
+        "channel_chunk_size": args.channel_chunk_size,
     }
     output = args.output_dir / "scarlet_matched_start{}.npz".format(args.start)
     np.savez_compressed(

@@ -47,7 +47,12 @@ about `2e-8` relative L2.
 `run_collaborator_reproduction.py` applies the same correction to the complete
 940-channel A/B/C experiment. It uses the same catalog-centered blobs,
 crop-then-recenter PSFs, measured variance, source labels, and 300-iteration
-budget as the corrected lisasep comparison. Submit all predeclared starts with:
+budget as the corrected lisasep comparison. The batch driver defaults to a
+single-precision fit and 64-channel likelihood chunks. On the 940x47x47 cube,
+these settings reduced measured one-step peak RSS from 1.43 GB to 0.615 GB;
+the strict recovery metrics were unchanged in the float32/chunk parity checks.
+The Python API retains float64 and unchunked defaults for compatibility.
+Submit all predeclared starts with:
 
 ```bash
 sbatch submit_collaborator_reproduction.sh
@@ -60,3 +65,7 @@ keep the original products isolated by setting both batch variables:
 sbatch --export=ALL,SCARLET_MAX_ITER=1500,SCARLET_RUN_LABEL=matched1500 \
   submit_collaborator_reproduction.sh
 ```
+
+Override the bounded-memory settings with `SCARLET_FIT_DTYPE` and
+`SCARLET_CHANNEL_CHUNK_SIZE`. Pass `--profile-memory` directly to the Python
+driver to print current and peak RSS checkpoints.

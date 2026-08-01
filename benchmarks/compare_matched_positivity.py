@@ -105,9 +105,11 @@ def _run_lisasep(case, data, noise, kernels, operators, max_iter):
     }
 
 
-def _run_scarlet(case, data, noise, kernels, max_iter):
+def _run_scarlet(case, data, noise, kernels, max_iter, fit_dtype):
+    data = np.asarray(data, dtype=fit_dtype)
+    kernels = np.asarray(kernels, dtype=fit_dtype)
     channels = list(range(N_CHANNELS))
-    delta_psf = scarlet.DeltaPSF(N_CHANNELS)
+    delta_psf = scarlet.DeltaPSF(N_CHANNELS, dtype=fit_dtype)
     frame = scarlet.Frame(data.shape, psf=delta_psf, channels=channels)
     observation = scarlet.Observation(
         data,
@@ -117,9 +119,11 @@ def _run_scarlet(case, data, noise, kernels, max_iter):
     ).match(frame)
     sources = []
     for start in case["starts"]:
-        spectrum = scarlet.TabulatedSpectrum(frame, np.ones(N_CHANNELS))
+        spectrum = scarlet.TabulatedSpectrum(
+            frame, np.ones(N_CHANNELS, dtype=fit_dtype)
+        )
         morphology = scarlet.ImageMorphology(
-            frame, start.copy(), resizing=False
+            frame, np.asarray(start, dtype=fit_dtype), resizing=False
         )
         sources.append(scarlet.FactorizedComponent(frame, spectrum, morphology))
     blend = scarlet.Blend(sources, observation)
@@ -206,6 +210,9 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--lisasep-max-iter", type=int, default=500)
     parser.add_argument("--scarlet-max-iter", type=int, default=600)
+    parser.add_argument(
+        "--scarlet-dtype", choices=("float32", "float64"), default="float64"
+    )
     args = parser.parse_args()
 
     kernels = np.asarray([gaussian_kernel()] * N_CHANNELS)
@@ -224,7 +231,14 @@ def main():
             ),
             (
                 "scarlet",
-                _run_scarlet(case, data, noise, kernels, args.scarlet_max_iter),
+                _run_scarlet(
+                    case,
+                    data,
+                    noise,
+                    kernels,
+                    args.scarlet_max_iter,
+                    np.dtype(args.scarlet_dtype),
+                ),
             ),
         ):
             record = _score(code, case_name, case, data, noise, result)
@@ -252,6 +266,7 @@ def main():
     payload = {
         "contract": "matched raw positivity factors",
         "model_frame_psf": "per-channel 1x1 delta",
+        "scarlet_dtype": args.scarlet_dtype,
         "records": records,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
