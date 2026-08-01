@@ -248,6 +248,9 @@ def main():
     order = _catalog_order(morphologies)
     spectra = [spectra[index] for index in order]
     morphologies = [morphologies[index] for index in order]
+    ordered_sources = [sources[index] for index in order]
+    mixing_intervals = scarlet.bilinear_mixing_intervals(ordered_sources)
+    mixing_envelopes = scarlet.pairwise_mixing_envelopes(ordered_sources)
 
     model = np.asarray(observation.render(blend.get_model()), dtype=float)
     residual = data - model
@@ -328,6 +331,36 @@ def main():
         "morphology_relative_projected_gradient": (
             optimality.morphology_relative_projected_gradient
         ),
+        "structural_mixing": {
+            "interpretation": (
+                "exact pairwise sensitivity floor; not posterior or +/-1 sigma"
+            ),
+            "intervals": [
+                {
+                    "donor": interval.donor,
+                    "receiver": interval.receiver,
+                    "delta_min": interval.delta_min,
+                    "delta_max": interval.delta_max,
+                }
+                for interval in mixing_intervals
+            ],
+            "components": [
+                {
+                    "component": envelope.component,
+                    "total_flux_min": envelope.total_flux_min,
+                    "total_flux_max": envelope.total_flux_max,
+                    "total_flux_min_fraction": (
+                        envelope.total_flux_min
+                        / max(float(np.sum(spectra[index])), np.finfo(float).tiny)
+                    ),
+                    "total_flux_max_fraction": (
+                        envelope.total_flux_max
+                        / max(float(np.sum(spectra[index])), np.finfo(float).tiny)
+                    ),
+                }
+                for index, envelope in enumerate(mixing_envelopes)
+            ],
+        },
     }
     output = args.output_dir / "scarlet_matched_start{}.npz".format(args.start)
     np.savez_compressed(
@@ -346,6 +379,14 @@ def main():
         psf_centering=np.asarray("crop_then_recenter"),
         model_frame_psf=np.asarray("per-channel_1x1_delta"),
         kernel_size=args.kernel_size,
+        structural_sed1_lower=mixing_envelopes[0].spectrum_lower,
+        structural_sed1_upper=mixing_envelopes[0].spectrum_upper,
+        structural_sed2_lower=mixing_envelopes[1].spectrum_lower,
+        structural_sed2_upper=mixing_envelopes[1].spectrum_upper,
+        structural_morph1_lower=mixing_envelopes[0].morphology_lower,
+        structural_morph1_upper=mixing_envelopes[0].morphology_upper,
+        structural_morph2_lower=mixing_envelopes[1].morphology_lower,
+        structural_morph2_upper=mixing_envelopes[1].morphology_upper,
     )
     (args.output_dir / "scarlet_matched_metrics.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n"

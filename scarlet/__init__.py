@@ -13,6 +13,12 @@ from .constraint import (
     SymmetryConstraint,
     CenterOnConstraint,
 )
+from .degeneracy import (
+    MixingInterval,
+    PairwiseMixingEnvelope,
+    bilinear_mixing_intervals,
+    pairwise_mixing_envelopes,
+)
 from .frame import Frame
 from .morphology import (
     Morphology,
