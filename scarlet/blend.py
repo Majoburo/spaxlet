@@ -1,3 +1,4 @@
+from collections import namedtuple
 from functools import partial
 
 import numpy.ma as ma
@@ -12,6 +13,19 @@ from .component import CombinedComponent
 from .model import UpdateException
 
 logger = logging.getLogger("scarlet.blend")
+
+
+ParameterOptimizationDiagnostics = namedtuple(
+    "ParameterOptimizationDiagnostics",
+    (
+        "relative_projected_gradient",
+        "spectral_relative_projected_gradient",
+        "morphology_relative_projected_gradient",
+        "projected_gradient_norm",
+        "weighted_data_energy",
+        "parameter_relative_projected_gradients",
+    ),
+)
 
 
 @primitive
@@ -81,6 +95,8 @@ class Blend(CombinedComponent):
 
         # only for backward compatibility, use log_likelihood instead
         self.loss = []
+        self._noise_factor = 0
+        self._channel_chunk_size = None
 
     def fit(
         self,
@@ -308,6 +324,11 @@ class Blend(CombinedComponent):
         return -np.array(self.loss)
 
     def _loss_func(self, *parameters):
+        total_loss = self._objective_func(*parameters)
+        self.loss.append(getattr(total_loss, "_value", total_loss))
+        return total_loss
+
+    def _objective_func(self, *parameters):
         n_params = len(self.parameters)
         model = self.get_model(*parameters[:n_params], frame=self.frame)
 
@@ -324,8 +345,107 @@ class Blend(CombinedComponent):
             )
             n_params += n_obs_params
 
-        self.loss.append(total_loss._value)
         return total_loss
+
+    def parameter_optimization_diagnostics(self, probe=1e-5):
+        """Return a dimensionless proximal first-order residual.
+
+        Each free parameter is probed with a gauge-covariant step
+        ``probe * ||x||**2 / E``, where ``E`` is the larger of the weighted
+        data energy and current objective magnitude. The resulting projected
+        gradient mapping is normalized as ``||r|| ||x|| / E``. Morphology
+        mappings have their radial component removed because that direction
+        is the exact spectrum--morphology scale gauge; spectral stationarity
+        is reported separately so a physical amplitude error is not hidden.
+
+        This diagnostic evaluates the declared constraints but does not alter
+        parameters or append to the fit history. It is intended as a KKT-style
+        stopping and comparison check, not as an identifiability diagnostic.
+        """
+        probe = float(probe)
+        if not np.isfinite(probe) or probe <= 0:
+            raise ValueError("probe must be finite and positive")
+        if self._noise_factor > 0:
+            raise ValueError(
+                "optimization diagnostics require deterministic noise_factor=0"
+            )
+
+        parameters = self.parameters + tuple(
+            parameter
+            for observation in self.observations
+            for parameter in observation.parameters
+        )
+        free_indices = tuple(
+            index for index, parameter in enumerate(parameters) if not parameter.fixed
+        )
+        weighted_data_energy = float(
+            sum(
+                np.sum(observation.weights * observation.data**2)
+                for observation in self.observations
+            )
+        )
+        if not free_indices:
+            return ParameterOptimizationDiagnostics(
+                0.0, 0.0, 0.0, 0.0, weighted_data_energy, ()
+            )
+
+        gradient_function = grad(self._objective_func, free_indices)
+        gradients = gradient_function(*parameters)
+        if len(free_indices) == 1 and not isinstance(gradients, tuple):
+            gradients = (gradients,)
+        objective = float(self._objective_func(*parameters))
+        scale = max(
+            abs(objective), weighted_data_energy, np.finfo(float).tiny
+        )
+
+        total_energy = 0.0
+        spectral_energy = 0.0
+        morphology_energy = 0.0
+        absolute_mapping_energy = 0.0
+        parameter_residuals = []
+        for index, gradient_value in zip(free_indices, gradients):
+            parameter = parameters[index]
+            gradient_value = np.asarray(gradient_value, dtype=float)
+            if parameter.prior is not None:
+                gradient_value = gradient_value + parameter.prior(
+                    parameter.view(np.ndarray)
+                )
+            value = np.asarray(parameter.view(np.ndarray), dtype=float)
+            value_norm = float(np.linalg.norm(value))
+            if value_norm <= np.finfo(float).tiny:
+                parameter_residuals.append((parameter.name, 0.0))
+                continue
+            step = probe * value_norm**2 / scale
+            trial = value - step * gradient_value
+            if parameter.constraint is not None:
+                projected = np.asarray(
+                    parameter.constraint(trial.copy(), step), dtype=float
+                )
+            else:
+                projected = trial
+            mapping = (value - projected) / step
+            if parameter.name in ("image", "coeffs"):
+                radial = float(np.vdot(value, mapping).real) / value_norm**2
+                mapping = mapping - radial * value
+            mapping_norm = float(np.linalg.norm(mapping))
+            relative = mapping_norm * value_norm / scale
+            energy = relative**2
+            total_energy += energy
+            absolute_mapping_energy += mapping_norm**2
+            if parameter.name == "spectrum":
+                spectral_energy += energy
+            elif parameter.name in ("image", "coeffs"):
+                morphology_energy += energy
+            parameter_residuals.append((parameter.name, relative))
+
+        return ParameterOptimizationDiagnostics(
+            float(np.sqrt(total_energy)),
+            float(np.sqrt(spectral_energy)),
+            float(np.sqrt(morphology_energy)),
+            float(np.sqrt(absolute_mapping_energy)),
+            weighted_data_energy,
+            tuple(parameter_residuals),
+        )
 
     def _callback(self, *parameters, it=None, e_rel=1e-3, callback=None, min_iter=1):
 

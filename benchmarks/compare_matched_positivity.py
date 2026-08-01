@@ -105,7 +105,7 @@ def _run_lisasep(case, data, noise, kernels, operators, max_iter):
     }
 
 
-def _run_scarlet(case, data, noise, kernels, max_iter, fit_dtype):
+def _run_scarlet(case, data, noise, kernels, max_iter, fit_dtype, scheme):
     data = np.asarray(data, dtype=fit_dtype)
     kernels = np.asarray(kernels, dtype=fit_dtype)
     channels = list(range(N_CHANNELS))
@@ -129,9 +129,10 @@ def _run_scarlet(case, data, noise, kernels, max_iter, fit_dtype):
     blend = scarlet.Blend(sources, observation)
     started = time.perf_counter()
     iterations, log_likelihood = blend.fit(
-        max_iter, e_rel=1e-10, project_initial=True
+        max_iter, e_rel=1e-10, project_initial=True, scheme=scheme
     )
     runtime = time.perf_counter() - started
+    optimality = blend.parameter_optimization_diagnostics()
     recovered_spectra = []
     recovered_morphologies = []
     for source in sources:
@@ -156,6 +157,16 @@ def _run_scarlet(case, data, noise, kernels, max_iter, fit_dtype):
         "converged_before_cap": int(iterations) < max_iter,
         "initial_projection_relative_l2": float(
             blend.initial_projection_relative_l2
+        ),
+        "scheme": scheme,
+        "parameter_relative_projected_gradient": (
+            optimality.relative_projected_gradient
+        ),
+        "spectral_relative_projected_gradient": (
+            optimality.spectral_relative_projected_gradient
+        ),
+        "morphology_relative_projected_gradient": (
+            optimality.morphology_relative_projected_gradient
         ),
     }
 
@@ -213,6 +224,11 @@ def main():
     parser.add_argument(
         "--scarlet-dtype", choices=("float32", "float64"), default="float64"
     )
+    parser.add_argument(
+        "--scarlet-scheme",
+        choices=("adam", "nadam", "adamx", "amsgrad", "padam", "radam"),
+        default="amsgrad",
+    )
     args = parser.parse_args()
 
     kernels = np.asarray([gaussian_kernel()] * N_CHANNELS)
@@ -238,6 +254,7 @@ def main():
                     kernels,
                     args.scarlet_max_iter,
                     np.dtype(args.scarlet_dtype),
+                    args.scarlet_scheme,
                 ),
             ),
         ):
@@ -267,6 +284,7 @@ def main():
         "contract": "matched raw positivity factors",
         "model_frame_psf": "per-channel 1x1 delta",
         "scarlet_dtype": args.scarlet_dtype,
+        "scarlet_scheme": args.scarlet_scheme,
         "records": records,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

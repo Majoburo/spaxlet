@@ -25,6 +25,7 @@ max_iter="${SCARLET_MAX_ITER:-300}"
 run_label="${SCARLET_RUN_LABEL:-matched300}"
 fit_dtype="${SCARLET_FIT_DTYPE:-float32}"
 channel_chunk_size="${SCARLET_CHANNEL_CHUNK_SIZE:-64}"
+optimizer_scheme="${SCARLET_OPTIMIZER_SCHEME:-amsgrad}"
 output_dir="${lisasep_root}/benchmark_artifacts/collaborator_blend_comparison/scarlet_${run_label}_start${start}"
 
 /nobackup/user/bustam1/lisastack_a6000/jwst/venv-scarlet/bin/python \
@@ -36,4 +37,5 @@ output_dir="${lisasep_root}/benchmark_artifacts/collaborator_blend_comparison/sc
   --max-iter "${max_iter}" \
   --relative-tolerance 1e-11 \
   --dtype "${fit_dtype}" \
-  --channel-chunk-size "${channel_chunk_size}"
+  --channel-chunk-size "${channel_chunk_size}" \
+  --optimizer-scheme "${optimizer_scheme}"

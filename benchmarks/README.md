@@ -67,5 +67,8 @@ sbatch --export=ALL,SCARLET_MAX_ITER=1500,SCARLET_RUN_LABEL=matched1500 \
 ```
 
 Override the bounded-memory settings with `SCARLET_FIT_DTYPE` and
-`SCARLET_CHANNEL_CHUNK_SIZE`. Pass `--profile-memory` directly to the Python
-driver to print current and peak RSS checkpoints.
+`SCARLET_CHANNEL_CHUNK_SIZE`, or select a declared adaprox scheme with
+`SCARLET_OPTIMIZER_SCHEME`. Pass `--profile-memory` directly to the Python
+driver to print current and peak RSS checkpoints. Every reproduction reports
+joint, spectral, and scale-gauge-quotiented morphology proximal-gradient
+residuals; a small loss change alone is not treated as convergence evidence.

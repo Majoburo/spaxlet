@@ -29,6 +29,7 @@ READ_VARIANCE = 0.000880653
 POISSON_COEFFICIENT = 0.00405419
 CATALOG_CENTERS = ((21.296, 25.784), (23.250, 24.480))
 START_SCALES = {"A": (3.0, 3.0), "B": (5.0, 2.0), "C": (2.0, 5.0)}
+OPTIMIZER_SCHEMES = ("adam", "nadam", "adamx", "amsgrad", "padam", "radam")
 
 
 def _parser():
@@ -41,6 +42,9 @@ def _parser():
     parser.add_argument("--relative-tolerance", type=float, default=1e-11)
     parser.add_argument("--dtype", choices=("float32", "float64"), default="float64")
     parser.add_argument("--channel-chunk-size", type=int)
+    parser.add_argument(
+        "--optimizer-scheme", choices=OPTIMIZER_SCHEMES, default="amsgrad"
+    )
     parser.add_argument("--profile-memory", action="store_true")
     return parser
 
@@ -171,9 +175,14 @@ def main():
         e_rel=args.relative_tolerance,
         project_initial=True,
         channel_chunk_size=args.channel_chunk_size,
+        scheme=args.optimizer_scheme,
     )
     runtime = time.perf_counter() - started
     _memory_checkpoint("fit", args.profile_memory)
+    optimality_started = time.perf_counter()
+    optimality = blend.parameter_optimization_diagnostics()
+    optimality_runtime = time.perf_counter() - optimality_started
+    _memory_checkpoint("optimality", args.profile_memory)
 
     spectra = []
     morphologies = []
@@ -252,6 +261,17 @@ def main():
         },
         "fit_dtype": args.dtype,
         "channel_chunk_size": args.channel_chunk_size,
+        "optimizer_scheme": args.optimizer_scheme,
+        "optimality_runtime_seconds": optimality_runtime,
+        "parameter_relative_projected_gradient": (
+            optimality.relative_projected_gradient
+        ),
+        "spectral_relative_projected_gradient": (
+            optimality.spectral_relative_projected_gradient
+        ),
+        "morphology_relative_projected_gradient": (
+            optimality.morphology_relative_projected_gradient
+        ),
     }
     output = args.output_dir / "scarlet_matched_start{}.npz".format(args.start)
     np.savez_compressed(
