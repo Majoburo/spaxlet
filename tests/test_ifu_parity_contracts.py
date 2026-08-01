@@ -108,7 +108,7 @@ class IFUParityContracts(unittest.TestCase):
     def test_scarlet_delta_frame_matches_declared_forward_model(self):
         channels = list(range(N_CHANNELS))
         kernels = np.asarray([gaussian_kernel()] * N_CHANNELS)
-        delta_psf = scarlet.ImagePSF(np.ones((N_CHANNELS, 1, 1)))
+        delta_psf = scarlet.DeltaPSF(N_CHANNELS)
         frame = scarlet.Frame(
             (N_CHANNELS,) + DEBLEND_SHAPE,
             psf=delta_psf,

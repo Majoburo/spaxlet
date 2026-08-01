@@ -107,7 +107,7 @@ def _run_lisasep(case, data, noise, kernels, operators, max_iter):
 
 def _run_scarlet(case, data, noise, kernels, max_iter):
     channels = list(range(N_CHANNELS))
-    delta_psf = scarlet.ImagePSF(np.ones((N_CHANNELS, 1, 1)))
+    delta_psf = scarlet.DeltaPSF(N_CHANNELS)
     frame = scarlet.Frame(data.shape, psf=delta_psf, channels=channels)
     observation = scarlet.Observation(
         data,

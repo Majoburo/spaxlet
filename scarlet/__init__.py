@@ -26,7 +26,7 @@ from .morphology import (
 from .observation import Observation
 from .parameter import Parameter
 from .prior import Prior
-from .psf import PSF, ImagePSF, FunctionPSF, GaussianPSF, MoffatPSF
+from .psf import PSF, ImagePSF, DeltaPSF, FunctionPSF, GaussianPSF, MoffatPSF
 from .source import (
     NullSource,
     RandomSource,

@@ -232,3 +232,26 @@ class ImagePSF(PSF):
             image = shift(image, offset, return_Fourier=False)
 
         return image
+
+
+class DeltaPSF(ImagePSF):
+    """Identity PSF for an intrinsic, unconvolved model frame.
+
+    Use this in a model :class:`~scarlet.frame.Frame` when component
+    morphologies represent the intrinsic sky and the observation PSF should be
+    applied directly by the renderer.  A narrow Gaussian is not an identity
+    kernel: PSF matching from even ``sigma=0.3`` can measurably change the
+    requested observation operator.
+
+    Parameters
+    ----------
+    channels: int
+        Number of model-frame channels.
+    dtype: numpy dtype
+        Storage dtype for the fixed one-pixel kernels.
+    """
+
+    def __init__(self, channels=1, dtype=float):
+        if not isinstance(channels, (int, np.integer)) or channels <= 0:
+            raise ValueError("channels must be a positive integer")
+        super().__init__(np.ones((channels, 1, 1), dtype=dtype))

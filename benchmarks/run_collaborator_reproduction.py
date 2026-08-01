@@ -94,7 +94,7 @@ def main():
 
     variance = READ_VARIANCE + POISSON_COEFFICIENT * np.maximum(data, 0.0)
     channels = ["ch{:04d}".format(index) for index in range(data.shape[0])]
-    delta_psf = scarlet.ImagePSF(np.ones((data.shape[0], 1, 1)))
+    delta_psf = scarlet.DeltaPSF(data.shape[0])
     frame = scarlet.Frame(data.shape, psf=delta_psf, channels=channels)
     observation = scarlet.Observation(
         data,
