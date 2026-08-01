@@ -21,7 +21,9 @@ export OPENBLAS_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 
 starts=(A B C)
 start="${starts[SLURM_ARRAY_TASK_ID]}"
-output_dir="${lisasep_root}/benchmark_artifacts/collaborator_blend_comparison/scarlet_matched_start${start}"
+max_iter="${SCARLET_MAX_ITER:-300}"
+run_label="${SCARLET_RUN_LABEL:-matched300}"
+output_dir="${lisasep_root}/benchmark_artifacts/collaborator_blend_comparison/scarlet_${run_label}_start${start}"
 
 /nobackup/user/bustam1/lisastack_a6000/jwst/venv-scarlet/bin/python \
   benchmarks/run_collaborator_reproduction.py \
@@ -29,5 +31,5 @@ output_dir="${lisasep_root}/benchmark_artifacts/collaborator_blend_comparison/sc
   --output-dir "${output_dir}" \
   --start "${start}" \
   --kernel-size 47 \
-  --max-iter 300 \
+  --max-iter "${max_iter}" \
   --relative-tolerance 1e-11

@@ -52,3 +52,11 @@ budget as the corrected lisasep comparison. Submit all predeclared starts with:
 ```bash
 sbatch submit_collaborator_reproduction.sh
 ```
+
+For a predeclared time-to-equal-fit comparison with a larger iteration cap,
+keep the original products isolated by setting both batch variables:
+
+```bash
+sbatch --export=ALL,SCARLET_MAX_ITER=1500,SCARLET_RUN_LABEL=matched1500 \
+  submit_collaborator_reproduction.sh
+```
