@@ -14,6 +14,7 @@ import gc
 import json
 from pathlib import Path
 import resource
+import subprocess
 import time
 import warnings
 
@@ -94,6 +95,33 @@ def _memory_checkpoint(label, enabled):
         ),
         flush=True,
     )
+
+
+def _repository_provenance():
+    root = Path(__file__).resolve().parents[1]
+
+    def git(*arguments):
+        return subprocess.check_output(
+            ("git", "-C", str(root), *arguments),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+
+    try:
+        commit = git("rev-parse", "HEAD")
+        branch = git("branch", "--show-current")
+        dirty = bool(git("status", "--porcelain"))
+    except (OSError, subprocess.CalledProcessError):
+        commit = None
+        branch = None
+        dirty = None
+    return {
+        "path": str(root),
+        "version": scarlet.__version__,
+        "commit": commit,
+        "branch": branch,
+        "dirty": dirty,
+    }
 
 
 def main():
@@ -295,6 +323,7 @@ def main():
         else float("nan")
     )
     report = {
+        "scarlet": _repository_provenance(),
         "start": args.start,
         "start_scales": list(scales),
         "catalog_order": list(order),
@@ -333,6 +362,9 @@ def main():
         "ifu_ingestion": {
             "kind": "measured_variance_and_mask_safe_arrays",
             "wavelength_unit": "um",
+            "wavelength_channels": int(wavelength.size),
+            "wavelength_min": float(wavelength[0]),
+            "wavelength_max": float(wavelength[-1]),
             "mask_summary": observation.ifu_mask_summary,
         },
         "fit_dtype": args.dtype,

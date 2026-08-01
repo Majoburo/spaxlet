@@ -13,7 +13,7 @@ set -euo pipefail
 scarlet_root=/panfs/accrepfs.vampire/home/bustam1/lisastack_a6000/scarlet-lisasep
 lisasep_root=/panfs/accrepfs.vampire/home/bustam1/lisastack_a6000/lisasep
 cd "${scarlet_root}"
-export PYTHONPATH="${scarlet_root}:${lisasep_root}/src"
+export PYTHONPATH="${scarlet_root}"
 export MPLCONFIGDIR=/tmp/scarlet-match-mpl-"${SLURM_ARRAY_JOB_ID}"-"${SLURM_ARRAY_TASK_ID}"
 export XDG_CACHE_HOME=/tmp/scarlet-match-cache-"${SLURM_ARRAY_JOB_ID}"-"${SLURM_ARRAY_TASK_ID}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
@@ -31,7 +31,7 @@ optimality_check_interval="${SCARLET_OPTIMALITY_CHECK_INTERVAL:-100}"
 output_dir="${lisasep_root}/benchmark_artifacts/collaborator_blend_comparison/scarlet_${run_label}_start${start}"
 
 /nobackup/user/bustam1/lisastack_a6000/jwst/venv-scarlet/bin/python \
-  benchmarks/run_collaborator_reproduction.py \
+  -m benchmarks.run_collaborator_reproduction \
   --data-root /panfs/accrepfs.vampire/nobackup/userspace/bustam1/lisastack_a6000/jwst/collab \
   --output-dir "${output_dir}" \
   --start "${start}" \
