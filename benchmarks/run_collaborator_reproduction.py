@@ -31,6 +31,7 @@ POISSON_COEFFICIENT = 0.00405419
 CATALOG_CENTERS = ((21.296, 25.784), (23.250, 24.480))
 START_SCALES = {"A": (3.0, 3.0), "B": (5.0, 2.0), "C": (2.0, 5.0)}
 OPTIMIZER_SCHEMES = ("adam", "nadam", "adamx", "amsgrad", "padam", "radam")
+FEATURES = ("positivity", "centroid")
 
 
 def _parser():
@@ -45,6 +46,12 @@ def _parser():
     parser.add_argument("--channel-chunk-size", type=int)
     parser.add_argument(
         "--optimizer-scheme", choices=OPTIMIZER_SCHEMES, default="amsgrad"
+    )
+    parser.add_argument(
+        "--feature",
+        choices=FEATURES,
+        default="positivity",
+        help="opt-in morphology constraint; positivity preserves the baseline",
     )
     parser.add_argument("--optimality-tolerance", type=float)
     parser.add_argument("--optimality-check-interval", type=int, default=100)
@@ -124,6 +131,27 @@ def _repository_provenance():
     }
 
 
+def _morphology_parameter(value, feature, center):
+    image = np.asarray(value).copy()
+    if feature == "positivity":
+        return image
+    if feature == "centroid":
+        constraint = scarlet.DykstraConstraintChain(
+            scarlet.CentroidConstraint(center),
+            scarlet.PositivityConstraint(),
+            max_iter=20000,
+            rtol=1e-12,
+            atol=1e-13,
+        )
+        return scarlet.Parameter(
+            image,
+            name="image",
+            step=scarlet.parameter.relative_step,
+            constraint=constraint,
+        )
+    raise ValueError("unknown morphology feature {!r}".format(feature))
+
+
 def main():
     args = _parser().parse_args()
     if args.optimality_tolerance is not None and args.optimality_tolerance < 0:
@@ -193,12 +221,14 @@ def main():
         blob(center, scale) for center, scale in zip(CATALOG_CENTERS, scales)
     ]
     sources = []
-    for morphology_start in starting_morphologies:
+    for morphology_start, center in zip(starting_morphologies, CATALOG_CENTERS):
         spectrum = scarlet.TabulatedSpectrum(
             frame, np.ones(data.shape[0], dtype=fit_dtype)
         )
         morphology = scarlet.ImageMorphology(
-            frame, morphology_start.copy(), resizing=False
+            frame,
+            _morphology_parameter(morphology_start, args.feature, center),
+            resizing=False,
         )
         sources.append(scarlet.FactorizedComponent(frame, spectrum, morphology))
     _memory_checkpoint("sources", args.profile_memory)
@@ -324,6 +354,12 @@ def main():
     )
     report = {
         "scarlet": _repository_provenance(),
+        "feature": args.feature,
+        "constraint_centers_yx": (
+            [list(center) for center in CATALOG_CENTERS]
+            if args.feature == "centroid"
+            else None
+        ),
         "start": args.start,
         "start_scales": list(scales),
         "catalog_order": list(order),
@@ -427,6 +463,7 @@ def main():
         / np.sqrt(data.shape[0]),
         psf_centering=np.asarray("crop_then_recenter"),
         model_frame_psf=np.asarray("per-channel_1x1_delta"),
+        feature=np.asarray(args.feature),
         kernel_size=args.kernel_size,
         structural_sed1_lower=mixing_envelopes[0].spectrum_lower,
         structural_sed1_upper=mixing_envelopes[0].spectrum_upper,

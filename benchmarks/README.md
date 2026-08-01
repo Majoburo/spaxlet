@@ -131,6 +131,13 @@ intervals plus integrated-spectrum and unit-flux-morphology envelopes. These
 are labeled structural sensitivity floors, not posterior or `+/-1 sigma`
 uncertainties.
 
+The full-cube driver retains free positivity factors by default. Set
+`SCARLET_FEATURE=centroid` in the batch environment, or pass
+`--feature centroid` directly, to apply the previously gated exact
+non-negative fixed-centroid constraint at the two independently declared
+catalog positions. Always use a separate run label and submit all A/B/C
+starts; this conditional arm is not a new default.
+
 Plot a saved Scarlet product without importing lisasep:
 
 ```bash
