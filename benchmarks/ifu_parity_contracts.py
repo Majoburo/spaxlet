@@ -114,20 +114,27 @@ def deblend_cases():
     return cases
 
 
-def noiseless_cube(case):
-    """Render a case with a shared zero-padded shift-invariant PSF."""
+def latent_cube(case):
+    """Return the source-summed intrinsic cube before PSF convolution."""
 
-    kernel = gaussian_kernel()
     result = np.empty((N_CHANNELS,) + DEBLEND_SHAPE, dtype=float)
     for channel in range(N_CHANNELS):
-        latent = sum(
+        result[channel] = sum(
             source_spectrum[channel] * morphology
             for source_spectrum, morphology in zip(
                 spectra(), case["morphologies"]
             )
         )
-        result[channel] = fftconvolve(latent, kernel, mode="same")
     return result
+
+
+def noiseless_cube(case):
+    """Render a case with a shared zero-padded shift-invariant PSF."""
+
+    kernel = gaussian_kernel()
+    return np.asarray(
+        [fftconvolve(channel, kernel, mode="same") for channel in latent_cube(case)]
+    )
 
 
 def noisy_cube(case_name, noise_fraction=0.003):

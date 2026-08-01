@@ -11,7 +11,10 @@ from benchmarks.ifu_parity_contracts import (
     OPERATOR_CENTER,
     OPERATOR_SHAPE,
     deblend_cases,
+    gaussian_kernel,
+    latent_cube,
     noisy_cube,
+    noiseless_cube,
     operator_morphologies,
 )
 
@@ -101,3 +104,37 @@ class IFUParityContracts(unittest.TestCase):
         close_separation = np.subtract(*cases["close_blend_helpful"]["centers"])
         self.assertAlmostEqual(np.linalg.norm(null_separation), 8.0)
         self.assertAlmostEqual(np.linalg.norm(close_separation), 4.0)
+
+    def test_scarlet_delta_frame_matches_declared_forward_model(self):
+        channels = list(range(N_CHANNELS))
+        kernels = np.asarray([gaussian_kernel()] * N_CHANNELS)
+        delta_psf = scarlet.ImagePSF(np.ones((N_CHANNELS, 1, 1)))
+        frame = scarlet.Frame(
+            (N_CHANNELS,) + DEBLEND_SHAPE,
+            psf=delta_psf,
+            channels=channels,
+        )
+        observation = scarlet.Observation(
+            np.zeros(frame.shape),
+            psf=scarlet.ImagePSF(kernels),
+            weights=np.ones(frame.shape),
+            channels=channels,
+        ).match(frame)
+        case = deblend_cases()["close_blend_helpful"]
+        rendered = np.asarray(observation.render(latent_cube(case)))
+        declared = noiseless_cube(case)
+        self.assertLess(_relative_l2(rendered, declared), 1e-7)
+
+        old_frame = scarlet.Frame(
+            frame.shape,
+            psf=scarlet.GaussianPSF(sigma=0.3),
+            channels=channels,
+        )
+        old_observation = scarlet.Observation(
+            np.zeros(frame.shape),
+            psf=scarlet.ImagePSF(kernels),
+            weights=np.ones(frame.shape),
+            channels=channels,
+        ).match(old_frame)
+        old_rendered = np.asarray(old_observation.render(latent_cube(case)))
+        self.assertGreater(_relative_l2(old_rendered, declared), 1e-2)
