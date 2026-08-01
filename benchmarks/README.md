@@ -122,3 +122,17 @@ Saved metrics and NPZ products also contain exact two-sided pairwise mixing
 intervals plus integrated-spectrum and unit-flux-morphology envelopes. These
 are labeled structural sensitivity floors, not posterior or `+/-1 sigma`
 uncertainties.
+
+Plot a saved Scarlet product without importing lisasep:
+
+```bash
+python -m benchmarks.plot_collaborator_reproduction \
+  --product /path/to/scarlet_matched_startA.npz \
+  --output-dir /path/to/plots
+```
+
+The metrics JSON is discovered beside the NPZ by default and records the truth
+FITS path. The command writes spectra with exact structural envelopes, unit-flux
+morphologies and residuals, the collapsed whitened data-minus-model residual,
+and a table of truth-independent fit diagnostics. Use `--metrics` or `--truth`
+to override either discovered path.
