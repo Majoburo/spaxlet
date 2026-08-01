@@ -78,6 +78,12 @@ contract with unit-bearing `wavelengths`. Matching then requires both sides to
 declare wavelengths and verifies the channel-mapped grids after unit
 conversion. Omitting wavelengths preserves historical broadband behavior.
 
+`Observation.from_ifu_arrays` ingests science, physical wavelengths, measured
+variance, and optional integer DQ arrays without changing the legacy
+constructor. Non-finite data, non-positive/non-finite variance, selected DQ
+bits, and full detector-gap channels receive zero inverse variance and finite
+zero-filled data, with mask counts retained on the observation.
+
 `run_collaborator_reproduction.py` applies the same correction to the complete
 940-channel A/B/C experiment. It uses the same catalog-centered blobs,
 crop-then-recenter PSFs, measured variance, source labels, and 300-iteration
