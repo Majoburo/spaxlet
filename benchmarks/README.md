@@ -84,6 +84,14 @@ constructor. Non-finite data, non-positive/non-finite variance, selected DQ
 bits, and full detector-gap channels receive zero inverse variance and finite
 zero-filled data, with mask counts retained on the observation.
 
+`SpatiallyVaryingConvolutionRenderer` is an opt-in response for aligned IFU
+frames when independent calibration supplies a rectangular grid of field PSFs.
+It requires an intrinsic `DeltaPSF` model frame and explicit
+`(channel, anchor, y, x)` kernels plus row/column anchor coordinates. Bilinear
+source-plane weights form a partition of unity, full and channel-chunked
+rendering share the same cached-FFT operator, and autograd uses its registered
+exact adjoint. Ordinary `Observation.match` behavior is unchanged.
+
 `run_collaborator_reproduction.py` applies the same correction to the complete
 940-channel A/B/C experiment. It uses the same catalog-centered blobs,
 crop-then-recenter PSFs, measured variance, source labels, and 300-iteration

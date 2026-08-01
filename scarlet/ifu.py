@@ -86,3 +86,62 @@ def recenter_psf_kernels(kernels):
         raise ValueError("PSF recentering produced an empty channel")
     centered /= mass[:, None, None]
     return centered, centroids
+
+
+def spatial_interpolation_weights(anchors_yx, image_shape):
+    """Bilinear field-anchor weights on an image pixel grid.
+
+    Coordinates outside the anchor rectangle use the nearest edge response.
+    The returned ``(n_anchor, y, x)`` array sums to one at every pixel.
+    """
+    try:
+        raw_y, raw_x = anchors_yx
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "anchors_yx must contain row and column coordinates"
+        ) from error
+    anchors_y = np.asarray(raw_y, dtype=float).reshape(-1)
+    anchors_x = np.asarray(raw_x, dtype=float).reshape(-1)
+    if anchors_y.size == 0 or anchors_x.size == 0:
+        raise ValueError("at least one anchor is required on each axis")
+    if np.any(~np.isfinite(anchors_y)) or np.any(~np.isfinite(anchors_x)):
+        raise ValueError("anchor coordinates must be finite")
+    if np.any(np.diff(anchors_y) <= 0) or np.any(np.diff(anchors_x) <= 0):
+        raise ValueError("anchor coordinates must be strictly increasing")
+    try:
+        resolved_shape = tuple(int(size) for size in image_shape)
+    except (TypeError, ValueError) as error:
+        raise ValueError("image_shape must contain two positive dimensions") from error
+    if len(resolved_shape) != 2:
+        raise ValueError("a varying response requires a two-dimensional image shape")
+    if any(size <= 0 for size in resolved_shape):
+        raise ValueError("image_shape must contain positive dimensions")
+
+    rows, columns = np.indices(resolved_shape, dtype=float)
+
+    def axis_weights(anchors, coordinate):
+        weights = np.zeros((anchors.size, *resolved_shape))
+        if anchors.size == 1:
+            weights[0] = 1
+            return weights
+        clamped = np.clip(coordinate, anchors[0], anchors[-1])
+        index = np.clip(np.searchsorted(anchors, clamped) - 1, 0, anchors.size - 2)
+        fraction = (clamped - anchors[index]) / (
+            anchors[index + 1] - anchors[index]
+        )
+        flat_index = index.reshape(-1)
+        positions = np.arange(flat_index.size)
+        flat_weights = weights.reshape(anchors.size, -1)
+        flat_weights[flat_index, positions] = (1 - fraction).reshape(-1)
+        np.add.at(
+            flat_weights,
+            (flat_index + 1, positions),
+            fraction.reshape(-1),
+        )
+        return weights
+
+    weight_y = axis_weights(anchors_y, rows)
+    weight_x = axis_weights(anchors_x, columns)
+    return (weight_y[:, None] * weight_x[None, :]).reshape(
+        anchors_y.size * anchors_x.size, *resolved_shape
+    )

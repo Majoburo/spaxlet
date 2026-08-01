@@ -22,7 +22,12 @@ from .degeneracy import (
     pairwise_mixing_envelopes,
 )
 from .frame import Frame
-from .ifu import crop_psf_kernels, psf_centroids, recenter_psf_kernels
+from .ifu import (
+    crop_psf_kernels,
+    psf_centroids,
+    recenter_psf_kernels,
+    spatial_interpolation_weights,
+)
 from .morphology import (
     Morphology,
     ImageMorphology,
@@ -36,6 +41,7 @@ from .observation import Observation
 from .parameter import Parameter
 from .prior import Prior
 from .psf import PSF, ImagePSF, DeltaPSF, FunctionPSF, GaussianPSF, MoffatPSF
+from .renderer import SpatiallyVaryingConvolutionRenderer
 from .source import (
     NullSource,
     RandomSource,
