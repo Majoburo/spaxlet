@@ -45,6 +45,8 @@ def _parser():
     parser.add_argument(
         "--optimizer-scheme", choices=OPTIMIZER_SCHEMES, default="amsgrad"
     )
+    parser.add_argument("--optimality-tolerance", type=float)
+    parser.add_argument("--optimality-check-interval", type=int, default=100)
     parser.add_argument("--profile-memory", action="store_true")
     return parser
 
@@ -96,6 +98,10 @@ def _memory_checkpoint(label, enabled):
 
 def main():
     args = _parser().parse_args()
+    if args.optimality_tolerance is not None and args.optimality_tolerance < 0:
+        raise ValueError("optimality_tolerance must be non-negative")
+    if args.optimality_check_interval <= 0:
+        raise ValueError("optimality_check_interval must be positive")
     fit_dtype = np.dtype(args.dtype)
     _memory_checkpoint("imports", args.profile_memory)
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -169,19 +175,65 @@ def main():
     del initial_model
     _memory_checkpoint("initial_model", args.profile_memory)
     blend = scarlet.Blend(sources, observation)
+    optimality_checks = []
+    periodic_optimality_runtime = 0.0
+
+    def check_optimality(*parameters, it=None):
+        nonlocal periodic_optimality_runtime
+        if (
+            args.optimality_tolerance is None
+            or it == 0
+            or it % args.optimality_check_interval != 0
+        ):
+            return
+        check_started = time.perf_counter()
+        diagnostic = blend.parameter_optimization_diagnostics()
+        periodic_optimality_runtime += time.perf_counter() - check_started
+        optimality_checks.append(
+            {
+                "iterations": len(blend.log_likelihood),
+                "parameter_relative_projected_gradient": (
+                    diagnostic.relative_projected_gradient
+                ),
+                "spectral_relative_projected_gradient": (
+                    diagnostic.spectral_relative_projected_gradient
+                ),
+                "morphology_relative_projected_gradient": (
+                    diagnostic.morphology_relative_projected_gradient
+                ),
+            }
+        )
+        if (
+            diagnostic.relative_projected_gradient
+            <= args.optimality_tolerance
+        ):
+            raise StopIteration("proximal optimality tolerance reached")
+
     started = time.perf_counter()
     iterations, log_likelihood = blend.fit(
         args.max_iter,
-        e_rel=args.relative_tolerance,
+        e_rel=(
+            0.0
+            if args.optimality_tolerance is not None
+            else args.relative_tolerance
+        ),
         project_initial=True,
         channel_chunk_size=args.channel_chunk_size,
         scheme=args.optimizer_scheme,
+        callback=check_optimality,
     )
     runtime = time.perf_counter() - started
     _memory_checkpoint("fit", args.profile_memory)
     optimality_started = time.perf_counter()
     optimality = blend.parameter_optimization_diagnostics()
-    optimality_runtime = time.perf_counter() - optimality_started
+    optimality_runtime = (
+        periodic_optimality_runtime + time.perf_counter() - optimality_started
+    )
+    optimality_converged = (
+        args.optimality_tolerance is not None
+        and optimality.relative_projected_gradient
+        <= args.optimality_tolerance
+    )
     _memory_checkpoint("optimality", args.profile_memory)
 
     spectra = []
@@ -238,6 +290,10 @@ def main():
         "iterations": int(iterations),
         "max_iter": args.max_iter,
         "converged_before_cap": int(iterations) < args.max_iter,
+        "optimality_converged": optimality_converged,
+        "optimality_tolerance": args.optimality_tolerance,
+        "optimality_check_interval": args.optimality_check_interval,
+        "optimality_checks": optimality_checks,
         "log_likelihood": float(log_likelihood),
         "final_relative_objective_change": relative_change,
         "initial_projection_relative_l2": float(

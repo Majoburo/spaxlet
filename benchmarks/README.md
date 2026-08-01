@@ -72,3 +72,6 @@ Override the bounded-memory settings with `SCARLET_FIT_DTYPE` and
 driver to print current and peak RSS checkpoints. Every reproduction reports
 joint, spectral, and scale-gauge-quotiented morphology proximal-gradient
 residuals; a small loss change alone is not treated as convergence evidence.
+The batch driver checks the joint residual every 100 iterations and stops at
+`1e-4` by default. Override those gates with
+`SCARLET_OPTIMALITY_TOLERANCE` and `SCARLET_OPTIMALITY_CHECK_INTERVAL`.
