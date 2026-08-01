@@ -38,6 +38,7 @@ from benchmarks.ifu_parity_metrics import (
 from lisasep import CubeComponent, IFUCube, Scene, wavelength_psf_operators
 from lisasep.constraints import (
     CenterOn,
+    CentroidFixed,
     ConstraintChain,
     Monotonicity,
     Positivity,
@@ -75,6 +76,8 @@ def _lisasep_morphology_constraint(feature, center):
             Positivity(),
             CenterOn(center=center),
         )
+    if feature == "centroid":
+        return CentroidFixed(DEBLEND_SHAPE, center)
     if feature.startswith("monotonic-"):
         return ConstraintChain(
             Monotonicity(
@@ -98,6 +101,14 @@ def _scarlet_morphology_constraint(feature, center):
             scarlet.SymmetryConstraint(center=center),
             scarlet.PositivityConstraint(),
             scarlet.CenterOnConstraint(center=center),
+        )
+    if feature == "centroid":
+        return scarlet.DykstraConstraintChain(
+            scarlet.CentroidConstraint(center),
+            scarlet.PositivityConstraint(),
+            max_iter=20000,
+            rtol=1e-12,
+            atol=1e-13,
         )
     if feature.startswith("monotonic-"):
         return scarlet.ConstraintChain(
@@ -291,6 +302,12 @@ def main():
     parser.add_argument("--lisasep-max-iter", type=int, default=500)
     parser.add_argument("--scarlet-max-iter", type=int, default=600)
     parser.add_argument(
+        "--case",
+        choices=("all",) + CASE_NAMES,
+        default="all",
+        help="run all predeclared cases or one bounded qualification case",
+    )
+    parser.add_argument(
         "--scarlet-dtype", choices=("float32", "float64"), default="float64"
     )
     parser.add_argument(
@@ -302,6 +319,7 @@ def main():
         "--feature",
         choices=(
             "positivity",
+            "centroid",
             "symmetry",
             "monotonic-flat",
             "monotonic-angle",
@@ -316,7 +334,8 @@ def main():
     operators = wavelength_psf_operators(kernels, DEBLEND_SHAPE, cache_fft=True)
     records = []
     cases = deblend_cases()
-    for case_name in CASE_NAMES:
+    selected_cases = CASE_NAMES if args.case == "all" else (args.case,)
+    for case_name in selected_cases:
         case = cases[case_name]
         data, noise, _ = noisy_cube(case_name)
         for code, result in (
@@ -370,6 +389,7 @@ def main():
             )
     contract = {
         "positivity": "matched raw positivity factors",
+        "centroid": "matched raw fixed-centroid factors",
         "symmetry": "matched raw centered-symmetry factors",
         "monotonic-flat": "matched raw flat-monotonic factors",
         "monotonic-angle": "matched raw angle-monotonic factors",

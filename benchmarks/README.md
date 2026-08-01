@@ -65,6 +65,10 @@ centroid. The exact chain deliberately rejects heuristic monotonicity and
 relaxed symmetry, and raises instead of silently returning a non-converged
 iterate. Historical `ConstraintChain` behavior is unchanged.
 
+Pass `--feature centroid` to exercise this exact intersection through the
+matched six-channel matrix in both codes. The arm fixes only the catalogued
+centroid and positivity; it does not impose symmetry or a radial profile.
+
 `run_collaborator_reproduction.py` applies the same correction to the complete
 940-channel A/B/C experiment. It uses the same catalog-centered blobs,
 crop-then-recenter PSFs, measured variance, source labels, and 300-iteration
