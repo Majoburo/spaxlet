@@ -136,3 +136,7 @@ FITS path. The command writes spectra with exact structural envelopes, unit-flux
 morphologies and residuals, the collapsed whitened data-minus-model residual,
 and a table of truth-independent fit diagnostics. Use `--metrics` or `--truth`
 to override either discovered path.
+
+`collaborator_reproduction.ipynb` wraps the same two module commands for
+interactive review. Its first code cell is the only configuration surface;
+the fit and plotting logic remain in the tested Python modules.
