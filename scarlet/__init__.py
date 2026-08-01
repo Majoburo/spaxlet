@@ -4,6 +4,7 @@ from .component import Component, FactorizedComponent, CubeComponent, CombinedCo
 from .constraint import (
     Constraint,
     ConstraintChain,
+    DykstraConstraintChain,
     PositivityConstraint,
     NormalizationConstraint,
     L0Constraint,
@@ -12,6 +13,7 @@ from .constraint import (
     MonotonicityConstraint,
     SymmetryConstraint,
     CenterOnConstraint,
+    CentroidConstraint,
 )
 from .degeneracy import (
     MixingInterval,

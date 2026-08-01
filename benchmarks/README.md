@@ -55,6 +55,16 @@ The same harness exposes Scarlet's existing monotonic operators as
 uses the declared fixed center, zero forced radial gradient, positivity, and
 center revival. These are comparison arms, not new source defaults.
 
+## Exact constraint intersections
+
+`DykstraConstraintChain` is an opt-in closest-point projector for intersections
+of constraints that explicitly declare exact convex Euclidean projections.
+`CentroidConstraint` supplies the linear fixed-centroid projector; combining it
+with positivity gives the closest non-negative morphology at a declared
+centroid. The exact chain deliberately rejects heuristic monotonicity and
+relaxed symmetry, and raises instead of silently returning a non-converged
+iterate. Historical `ConstraintChain` behavior is unchanged.
+
 `run_collaborator_reproduction.py` applies the same correction to the complete
 940-channel A/B/C experiment. It uses the same catalog-centered blobs,
 crop-then-recenter PSFs, measured variance, source labels, and 300-iteration

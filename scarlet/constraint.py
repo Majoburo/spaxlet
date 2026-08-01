@@ -39,6 +39,8 @@ class Constraint:
     `Constraint`.
     """
 
+    is_euclidean_projection = False
+
     def __init__(self, f=None):
         """Constraint base class
 
@@ -93,9 +95,91 @@ class ConstraintChain:
         return X
 
 
+class DykstraConstraintChain(ConstraintChain):
+    """Project onto the intersection of exact convex constraint sets.
+
+    Unlike :class:`ConstraintChain`, Dykstra's correction terms converge to the
+    closest point in the intersection, not merely to a feasible point. Every
+    member must explicitly declare that it is an exact Euclidean projection;
+    heuristic transforms such as :class:`MonotonicityConstraint` are rejected.
+
+    Parameters
+    ----------
+    constraints: list of `Constraint`
+        Exact Euclidean projections onto closed convex sets.
+    max_iter: int
+        Maximum number of complete Dykstra sweeps.
+    rtol, atol: float
+        Relative and absolute convergence tolerances for both iterate change
+        and residual constraint violation.
+    """
+
+    is_euclidean_projection = True
+
+    def __init__(self, *constraints, max_iter=10000, rtol=1e-10, atol=1e-12):
+        if not constraints:
+            raise ValueError("a Dykstra chain requires at least one constraint")
+        invalid = [
+            type(constraint).__name__
+            for constraint in constraints
+            if not getattr(constraint, "is_euclidean_projection", False)
+        ]
+        if invalid:
+            raise ValueError(
+                "Dykstra requires exact Euclidean projections; invalid: "
+                + ", ".join(invalid)
+            )
+        if not isinstance(max_iter, (int, np.integer)) or max_iter < 1:
+            raise ValueError("max_iter must be a positive integer")
+        if not np.isfinite(rtol) or rtol < 0:
+            raise ValueError("rtol must be finite and non-negative")
+        if not np.isfinite(atol) or atol < 0:
+            raise ValueError("atol must be finite and non-negative")
+        super().__init__(*constraints, repeat=1)
+        self.max_iter = int(max_iter)
+        self.rtol = float(rtol)
+        self.atol = float(atol)
+
+    def __call__(self, X, step):
+        original = np.asarray(X)
+        result = original.copy()
+        corrections = [np.zeros_like(result) for _ in self.constraints]
+        scale = max(float(np.linalg.norm(original)), 1.0)
+        threshold = self.atol + self.rtol * scale
+
+        for _ in range(self.max_iter):
+            previous = result.copy()
+            for index, constraint in enumerate(self.constraints):
+                shifted = result + corrections[index]
+                projected = np.asarray(constraint(shifted.copy(), step))
+                if projected.shape != original.shape:
+                    raise ValueError("constraints in a chain must preserve shape")
+                corrections[index] = shifted - projected
+                result = projected
+
+            change = float(np.linalg.norm(result - previous))
+            if change <= threshold:
+                violations = [
+                    float(
+                        np.linalg.norm(
+                            np.asarray(constraint(result.copy(), step)) - result
+                        )
+                    )
+                    for constraint in self.constraints
+                ]
+                if max(violations, default=0.0) <= threshold:
+                    return result
+
+        raise RuntimeError(
+            "Dykstra projection did not converge in {} sweeps".format(self.max_iter)
+        )
+
+
 class PositivityConstraint(Constraint):
     """Allow only values not smaller than `zero`.
     """
+
+    is_euclidean_projection = True
 
     def __init__(self, zero=0):
         self.zero = zero
@@ -285,6 +369,13 @@ class SymmetryConstraint(Constraint):
         self.strength = strength
         self.center = center
 
+    @property
+    def is_euclidean_projection(self):
+        # An explicit integer center selects an odd finite-support patch whose
+        # reflected pairs are averaged exactly. The historical implicit-center
+        # operator pads even axes and is therefore not always idempotent.
+        return self.strength == 1 and self.center is not None
+
     def __call__(self, morph, step):
         if self.center is not None:
             center = _constraint_center(morph.shape, self.center)
@@ -302,6 +393,8 @@ class CenterOnConstraint(Constraint):
     """Sets the center pixel to a tiny non-zero value
     """
 
+    is_euclidean_projection = True
+
     def __init__(self, tiny=1e-6, center=None):
         self.tiny = tiny
         self.center = center
@@ -311,6 +404,49 @@ class CenterOnConstraint(Constraint):
         center = _constraint_center(shape, self.center)
         morph[center] = max(morph[center], self.tiny)
         return morph
+
+
+class CentroidConstraint(Constraint):
+    """Project a 2-D morphology onto a fixed flux-weighted centroid.
+
+    For non-zero morphology ``m``, fixing its centroid to ``c`` is equivalent
+    to the two linear equations ``sum(m * (row-c_row)) = 0`` and
+    ``sum(m * (column-c_column)) = 0``. This class is the exact Euclidean
+    projector onto that linear subspace. Combine it with
+    :class:`PositivityConstraint` through :class:`DykstraConstraintChain` to
+    obtain the closest non-negative morphology with the declared centroid.
+
+    Parameters
+    ----------
+    center: tuple of float
+        Target ``(row, column)`` centroid in morphology pixel coordinates.
+    """
+
+    is_euclidean_projection = True
+
+    def __init__(self, center):
+        if len(center) != 2 or not np.all(np.isfinite(center)):
+            raise ValueError("center must contain two finite coordinates")
+        self.center = tuple(float(coordinate) for coordinate in center)
+
+    def __call__(self, morph, step):
+        value = np.asarray(morph)
+        if value.ndim != 2:
+            raise ValueError("centroid constraints require a 2-D morphology")
+        if any(
+            coordinate < 0 or coordinate > size - 1
+            for coordinate, size in zip(self.center, value.shape)
+        ):
+            raise ValueError("centroid must lie inside the morphology")
+
+        rows, columns = np.indices(value.shape, dtype=float)
+        design = np.stack(
+            (rows - self.center[0], columns - self.center[1]), axis=0
+        ).reshape(2, -1)
+        flat = value.reshape(-1)
+        gram = design @ design.T
+        correction = design.T @ np.linalg.pinv(gram) @ (design @ flat)
+        return (flat - correction).reshape(value.shape)
 
 
 class LeakyConstraint(Constraint):
