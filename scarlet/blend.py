@@ -82,7 +82,15 @@ class Blend(CombinedComponent):
         # only for backward compatibility, use log_likelihood instead
         self.loss = []
 
-    def fit(self, max_iter=200, e_rel=1e-3, min_iter=1, noise_factor=0, **alg_kwargs):
+    def fit(
+        self,
+        max_iter=200,
+        e_rel=1e-3,
+        min_iter=1,
+        noise_factor=0,
+        project_initial=False,
+        **alg_kwargs
+    ):
         """Fit the model for each source to the data
 
         Parameters
@@ -95,7 +103,39 @@ class Blend(CombinedComponent):
             Maximum number of iterations if the algorithm doesn't converge
         alg_kwargs: dict
             Keywords for the `proxmin.adaprox` optimizer
+        project_initial: bool
+            Project every free starting parameter through its declared
+            constraint before evaluating the first model. This is useful for
+            caller-supplied factors: an infeasible start can otherwise create
+            a large first proximal jump unrelated to the gradient. The default
+            is ``False`` for backward compatibility.
         """
+        if not isinstance(project_initial, (bool, np.bool_)):
+            raise TypeError("project_initial must be boolean")
+        self.initial_projection_relative_l2 = 0.0
+        if project_initial:
+            parameters = self.parameters + tuple(
+                parameter
+                for observation in self.observations
+                for parameter in observation.parameters
+            )
+            change_squared = 0.0
+            scale_squared = 0.0
+            for parameter in parameters:
+                if parameter.fixed or parameter.constraint is None:
+                    continue
+                original = parameter.copy()
+                projected = np.asarray(parameter.constraint(original.copy(), 0))
+                if projected.shape != parameter.shape:
+                    raise ValueError("an initial projection changed parameter shape")
+                if not np.all(np.isfinite(projected)):
+                    raise ValueError("an initial projection produced non-finite values")
+                parameter[...] = projected
+                change_squared += float(np.sum((projected - original) ** 2))
+                scale_squared += float(np.sum(original**2))
+            self.initial_projection_relative_l2 = np.sqrt(change_squared) / max(
+                np.sqrt(scale_squared), np.finfo(float).tiny
+            )
         it = 0
         self._noise_factor = noise_factor
         while it < max_iter:

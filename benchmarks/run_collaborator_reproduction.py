@@ -129,7 +129,9 @@ def main():
     blend = scarlet.Blend(sources, observation)
     started = time.perf_counter()
     iterations, log_likelihood = blend.fit(
-        args.max_iter, e_rel=args.relative_tolerance
+        args.max_iter,
+        e_rel=args.relative_tolerance,
+        project_initial=True,
     )
     runtime = time.perf_counter() - started
 
@@ -188,6 +190,9 @@ def main():
         "converged_before_cap": int(iterations) < args.max_iter,
         "log_likelihood": float(log_likelihood),
         "final_relative_objective_change": relative_change,
+        "initial_projection_relative_l2": float(
+            blend.initial_projection_relative_l2
+        ),
         "initial_chi_square_per_voxel": initial_chi_square,
         "residual": residual_score,
         "sources": source_scores,

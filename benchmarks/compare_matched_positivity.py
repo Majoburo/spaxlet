@@ -124,7 +124,9 @@ def _run_scarlet(case, data, noise, kernels, max_iter):
         sources.append(scarlet.FactorizedComponent(frame, spectrum, morphology))
     blend = scarlet.Blend(sources, observation)
     started = time.perf_counter()
-    iterations, log_likelihood = blend.fit(max_iter, e_rel=1e-10)
+    iterations, log_likelihood = blend.fit(
+        max_iter, e_rel=1e-10, project_initial=True
+    )
     runtime = time.perf_counter() - started
     recovered_spectra = []
     recovered_morphologies = []
@@ -148,6 +150,9 @@ def _run_scarlet(case, data, noise, kernels, max_iter):
         "final_relative_objective_change": relative_change,
         "runtime_seconds": runtime,
         "converged_before_cap": int(iterations) < max_iter,
+        "initial_projection_relative_l2": float(
+            blend.initial_projection_relative_l2
+        ),
     }
 
 
