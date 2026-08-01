@@ -164,3 +164,57 @@ class TestObservation(object):
             base_diagnostic.morphology_relative_projected_gradient,
             rtol=2e-5,
         )
+
+    def test_initial_factor_normalization_removes_arbitrary_scale_gauge(self):
+        rng = np.random.RandomState(31)
+        shape = (3, 9, 9)
+        channels = np.arange(shape[0])
+        psf = scarlet.DeltaPSF(shape[0])
+        frame = scarlet.Frame(shape, psf=psf, channels=channels)
+        spectrum = np.asarray([0.7, 1.1, 1.6])
+        morphology = rng.uniform(0.2, 1.0, size=shape[1:])
+        morphology /= morphology.sum()
+        data = spectrum[:, None, None] * morphology[None]
+        observation = scarlet.Observation(
+            data,
+            psf=psf,
+            weights=np.full(shape, 4.0),
+            channels=channels,
+        ).match(frame)
+
+        def fitted(scale):
+            source = scarlet.FactorizedComponent(
+                frame,
+                scarlet.TabulatedSpectrum(frame, spectrum / scale),
+                scarlet.ImageMorphology(
+                    frame, morphology * scale, resizing=False
+                ),
+            )
+            blend = scarlet.Blend([source], observation)
+            blend.fit(
+                3,
+                e_rel=0,
+                project_initial=True,
+                normalize_initial_factors=True,
+            )
+            return blend, source
+
+        baseline, baseline_source = fitted(1.0)
+        rescaled, rescaled_source = fitted(1e3)
+        np.testing.assert_allclose(
+            rescaled_source.spectrum.get_model(),
+            baseline_source.spectrum.get_model(),
+            rtol=1e-12,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            rescaled_source.morphology.get_model(),
+            baseline_source.morphology.get_model(),
+            rtol=1e-12,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            rescaled.log_likelihood, baseline.log_likelihood, rtol=1e-12
+        )
+        assert baseline.initial_normalization_relative_l2 < 1e-12
+        assert rescaled.initial_normalization_relative_l2 > 0.9

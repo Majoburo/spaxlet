@@ -218,6 +218,7 @@ def main():
             else args.relative_tolerance
         ),
         project_initial=True,
+        normalize_initial_factors=True,
         channel_chunk_size=args.channel_chunk_size,
         scheme=args.optimizer_scheme,
         callback=check_optimality,
@@ -301,6 +302,9 @@ def main():
         "final_relative_objective_change": relative_change,
         "initial_projection_relative_l2": float(
             blend.initial_projection_relative_l2
+        ),
+        "initial_normalization_relative_l2": float(
+            blend.initial_normalization_relative_l2
         ),
         "initial_chi_square_per_voxel": initial_chi_square,
         "residual": residual_score,

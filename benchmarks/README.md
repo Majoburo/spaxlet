@@ -75,6 +75,9 @@ residuals; a small loss change alone is not treated as convergence evidence.
 The batch driver checks the joint residual every 100 iterations and stops at
 `1e-4` by default. Override those gates with
 `SCARLET_OPTIMALITY_TOLERANCE` and `SCARLET_OPTIMALITY_CHECK_INTERVAL`.
+Free raw factors are feasibility-projected and placed in a common L1
+morphology gauge before fitting; this is an exact no-op on the unit-sum A/B/C
+starts and removes arbitrary caller-supplied spectrum/morphology rescalings.
 Saved metrics and NPZ products also contain exact two-sided pairwise mixing
 intervals plus integrated-spectrum and unit-flux-morphology envelopes. These
 are labeled structural sensitivity floors, not posterior or `+/-1 sigma`

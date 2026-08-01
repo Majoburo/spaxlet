@@ -129,7 +129,11 @@ def _run_scarlet(case, data, noise, kernels, max_iter, fit_dtype, scheme):
     blend = scarlet.Blend(sources, observation)
     started = time.perf_counter()
     iterations, log_likelihood = blend.fit(
-        max_iter, e_rel=1e-10, project_initial=True, scheme=scheme
+        max_iter,
+        e_rel=1e-10,
+        project_initial=True,
+        normalize_initial_factors=True,
+        scheme=scheme,
     )
     runtime = time.perf_counter() - started
     optimality = blend.parameter_optimization_diagnostics()
@@ -157,6 +161,9 @@ def _run_scarlet(case, data, noise, kernels, max_iter, fit_dtype, scheme):
         "converged_before_cap": int(iterations) < max_iter,
         "initial_projection_relative_l2": float(
             blend.initial_projection_relative_l2
+        ),
+        "initial_normalization_relative_l2": float(
+            blend.initial_normalization_relative_l2
         ),
         "scheme": scheme,
         "parameter_relative_projected_gradient": (

@@ -105,6 +105,7 @@ class Blend(CombinedComponent):
         min_iter=1,
         noise_factor=0,
         project_initial=False,
+        normalize_initial_factors=False,
         channel_chunk_size=None,
         **alg_kwargs
     ):
@@ -126,6 +127,13 @@ class Blend(CombinedComponent):
             caller-supplied factors: an infeasible start can otherwise create
             a large first proximal jump unrelated to the gradient. The default
             is ``False`` for backward compatibility.
+        normalize_initial_factors: bool
+            Put every free tabulated-spectrum/image-morphology pair in a
+            common L1 gauge before optimization: the morphology is divided by
+            its sum and the spectrum is multiplied by the same value. The
+            source model is unchanged. The normalized morphology must remain
+            feasible under its declared constraint. The default is ``False``
+            for backward compatibility.
         channel_chunk_size: int or None
             Render and score this many observation channels at a time. This
             lowers peak memory for compatible renderers without changing the
@@ -133,6 +141,8 @@ class Blend(CombinedComponent):
         """
         if not isinstance(project_initial, (bool, np.bool_)):
             raise TypeError("project_initial must be boolean")
+        if not isinstance(normalize_initial_factors, (bool, np.bool_)):
+            raise TypeError("normalize_initial_factors must be boolean")
         if channel_chunk_size is not None:
             if not isinstance(channel_chunk_size, (int, np.integer)):
                 raise TypeError("channel_chunk_size must be an integer or None")
@@ -162,6 +172,69 @@ class Blend(CombinedComponent):
             self.initial_projection_relative_l2 = np.sqrt(change_squared) / max(
                 np.sqrt(scale_squared), np.finfo(float).tiny
             )
+        self.initial_normalization_relative_l2 = 0.0
+        if normalize_initial_factors:
+            change_squared = 0.0
+            scale_squared = 0.0
+            for source in self.sources:
+                spectrum_parameters = tuple(
+                    parameter
+                    for parameter in source.parameters
+                    if parameter.name == "spectrum"
+                )
+                morphology_parameters = tuple(
+                    parameter
+                    for parameter in source.parameters
+                    if parameter.name == "image"
+                )
+                if not spectrum_parameters or not morphology_parameters:
+                    continue
+                if len(spectrum_parameters) != 1 or len(morphology_parameters) != 1:
+                    raise ValueError(
+                        "initial factor normalization requires one spectrum "
+                        "and one image parameter per source"
+                    )
+                spectrum = spectrum_parameters[0]
+                morphology = morphology_parameters[0]
+                if spectrum.fixed or morphology.fixed:
+                    continue
+                if np.any(morphology < -1e-12):
+                    raise ValueError(
+                        "initial factor normalization requires a non-negative "
+                        "morphology; use project_initial=True first"
+                    )
+                factor = float(np.sum(morphology))
+                if not np.isfinite(factor) or factor <= np.finfo(float).tiny:
+                    raise ValueError(
+                        "initial factor normalization requires positive "
+                        "morphology flux"
+                    )
+                normalized = np.asarray(morphology / factor)
+                if morphology.constraint is not None:
+                    feasible = np.asarray(
+                        morphology.constraint(normalized.copy(), 0), dtype=float
+                    )
+                    if not np.allclose(
+                        feasible, normalized, rtol=1e-7, atol=1e-12
+                    ):
+                        raise ValueError(
+                            "L1 factor normalization is incompatible with the "
+                            "declared morphology constraint"
+                        )
+                old_spectrum = spectrum.copy()
+                old_morphology = morphology.copy()
+                spectrum[...] = spectrum * factor
+                morphology[...] = normalized
+                change_squared += float(
+                    np.sum((spectrum - old_spectrum) ** 2)
+                    + np.sum((morphology - old_morphology) ** 2)
+                )
+                scale_squared += float(
+                    np.sum(old_spectrum**2) + np.sum(old_morphology**2)
+                )
+            self.initial_normalization_relative_l2 = np.sqrt(
+                change_squared
+            ) / max(np.sqrt(scale_squared), np.finfo(float).tiny)
         it = 0
         self._noise_factor = noise_factor
         self._channel_chunk_size = channel_chunk_size
