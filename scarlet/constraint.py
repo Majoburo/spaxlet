@@ -428,6 +428,7 @@ class CentroidConstraint(Constraint):
         if len(center) != 2 or not np.all(np.isfinite(center)):
             raise ValueError("center must contain two finite coordinates")
         self.center = tuple(float(coordinate) for coordinate in center)
+        self._projection_cache = {}
 
     def __call__(self, morph, step):
         value = np.asarray(morph)
@@ -439,13 +440,16 @@ class CentroidConstraint(Constraint):
         ):
             raise ValueError("centroid must lie inside the morphology")
 
-        rows, columns = np.indices(value.shape, dtype=float)
-        design = np.stack(
-            (rows - self.center[0], columns - self.center[1]), axis=0
-        ).reshape(2, -1)
+        if value.shape not in self._projection_cache:
+            rows, columns = np.indices(value.shape, dtype=float)
+            design = np.stack(
+                (rows - self.center[0], columns - self.center[1]), axis=0
+            ).reshape(2, -1)
+            gram_inverse = np.linalg.pinv(design @ design.T)
+            self._projection_cache[value.shape] = (design, gram_inverse)
+        design, gram_inverse = self._projection_cache[value.shape]
         flat = value.reshape(-1)
-        gram = design @ design.T
-        correction = design.T @ np.linalg.pinv(gram) @ (design @ flat)
+        correction = design.T @ gram_inverse @ (design @ flat)
         return (flat - correction).reshape(value.shape)
 
 
