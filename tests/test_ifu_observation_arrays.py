@@ -79,6 +79,41 @@ class IFUObservationArraysTest(unittest.TestCase):
         observation.match(frame)
         self.assertTrue(np.isfinite(observation.get_log_likelihood(np.zeros(data.shape))))
 
+    def test_clean_arrays_match_legacy_observation_exactly(self):
+        data, variance, _ = self._arrays()
+        wavelengths = np.array([1.0, 1.1, 1.2]) * u.um
+        psf = scarlet.DeltaPSF(3)
+        channels = ("a", "b", "c")
+
+        legacy = scarlet.Observation(
+            data,
+            psf=psf,
+            weights=1.0 / variance,
+            channels=channels,
+        ).match(scarlet.Frame(data.shape, psf=psf, channels=channels))
+        ingested = scarlet.Observation.from_ifu_arrays(
+            data,
+            wavelengths,
+            variance,
+            psf=psf,
+            channels=channels,
+        ).match(
+            scarlet.Frame(
+                data.shape,
+                psf=psf,
+                channels=channels,
+                wavelengths=wavelengths,
+            )
+        )
+
+        np.testing.assert_array_equal(ingested.data, legacy.data)
+        np.testing.assert_array_equal(ingested.weights, legacy.weights)
+        model = np.arange(data.size, dtype=float).reshape(data.shape)
+        self.assertEqual(
+            ingested.get_log_likelihood(model), legacy.get_log_likelihood(model)
+        )
+        self.assertEqual(ingested.ifu_mask_summary["valid"], data.size)
+
     def test_invalid_array_contracts_fail_early(self):
         data, variance, dq = self._arrays()
         wavelengths = np.array([1.0, 1.1, 1.2]) * u.um

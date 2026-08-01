@@ -19,6 +19,7 @@ import warnings
 
 import numpy as np
 import scarlet
+from astropy import units as u
 from astropy.io import fits
 
 from benchmarks.ifu_parity_metrics import morphology_metrics, residual_metrics, spectral_metrics
@@ -135,14 +136,22 @@ def main():
         READ_VARIANCE + POISSON_COEFFICIENT * np.maximum(data, 0.0),
         dtype=fit_dtype,
     )
+    physical_wavelengths = wavelength * u.um
     channels = ["ch{:04d}".format(index) for index in range(data.shape[0])]
     delta_psf = scarlet.DeltaPSF(data.shape[0], dtype=fit_dtype)
-    frame = scarlet.Frame(data.shape, psf=delta_psf, channels=channels)
-    observation = scarlet.Observation(
-        data,
-        psf=scarlet.ImagePSF(kernels),
-        weights=1.0 / variance,
+    frame = scarlet.Frame(
+        data.shape,
+        psf=delta_psf,
         channels=channels,
+        wavelengths=physical_wavelengths,
+    )
+    observation = scarlet.Observation.from_ifu_arrays(
+        data,
+        physical_wavelengths,
+        variance,
+        psf=scarlet.ImagePSF(kernels),
+        channels=channels,
+        dtype=fit_dtype,
     ).match(frame)
     _memory_checkpoint("matched_observation", args.profile_memory)
 
@@ -321,6 +330,11 @@ def main():
             "kind": "fixed_data_based_read_plus_poisson",
             "read_variance": READ_VARIANCE,
             "poisson_coefficient": POISSON_COEFFICIENT,
+        },
+        "ifu_ingestion": {
+            "kind": "measured_variance_and_mask_safe_arrays",
+            "wavelength_unit": "um",
+            "mask_summary": observation.ifu_mask_summary,
         },
         "fit_dtype": args.dtype,
         "channel_chunk_size": args.channel_chunk_size,
