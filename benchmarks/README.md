@@ -73,6 +73,11 @@ Dynamic `ImageMorphology` growth and shrinkage rebase explicit local constraint
 centers by the opposite bounding-box shift, preserving their global pixel
 coordinates. Coordinate-free historical constraints are reused unchanged.
 
+IFU `Frame` and `Observation` objects can opt into a physical spectral-grid
+contract with unit-bearing `wavelengths`. Matching then requires both sides to
+declare wavelengths and verifies the channel-mapped grids after unit
+conversion. Omitting wavelengths preserves historical broadband behavior.
+
 `run_collaborator_reproduction.py` applies the same correction to the complete
 940-channel A/B/C experiment. It uses the same catalog-centered blobs,
 crop-then-recenter PSFs, measured variance, source labels, and 300-iteration

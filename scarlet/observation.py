@@ -1,4 +1,5 @@
 import autograd.numpy as np
+from astropy import units as u
 
 from . import interpolation
 from .bbox import Box, overlapped_slices
@@ -20,7 +21,16 @@ class Observation(Frame):
         to zero.
     """
 
-    def __init__(self, data, channels, psf=None, weights=None, wcs=None, padding=10):
+    def __init__(
+        self,
+        data,
+        channels,
+        psf=None,
+        weights=None,
+        wcs=None,
+        padding=10,
+        wavelengths=None,
+    ):
         """Create an Observation
 
         Parameters
@@ -38,13 +48,20 @@ class Observation(Frame):
             World Coordinate System associated with the data.
         channels: list of hashable elements
             Names/identifiers of spectral channels
+        wavelengths: `astropy.units.Quantity` or None
+            Optional strictly increasing physical wavelength for every channel.
         padding: int
             Number of pixels to pad each side with, in addition to
             half the width of the PSF, for FFTs. This is needed to
             prevent artifacts from the FFT.
         """
         super().__init__(
-            data.shape, wcs=wcs, psf=psf, channels=channels, dtype=data.dtype
+            data.shape,
+            wcs=wcs,
+            psf=psf,
+            channels=channels,
+            dtype=data.dtype,
+            wavelengths=wavelengths,
         )
 
         self.data = data
@@ -74,6 +91,30 @@ class Observation(Frame):
         -------
         None
         """
+        if (self.wavelengths is None) != (model_frame.wavelengths is None):
+            raise ValueError(
+                "model and observation must either both declare wavelengths or neither"
+            )
+        if self.wavelengths is not None:
+            model_channels = list(model_frame.channels)
+            try:
+                indices = [model_channels.index(channel) for channel in self.channels]
+            except ValueError as error:
+                raise ValueError(
+                    "observation channel is absent from the model frame"
+                ) from error
+            model_wavelengths = model_frame.wavelengths[indices].to_value(u.m)
+            observed_wavelengths = self.wavelengths.to_value(u.m)
+            if not np.allclose(
+                model_wavelengths,
+                observed_wavelengths,
+                rtol=1e-10,
+                atol=0.0,
+            ):
+                raise ValueError(
+                    "model and observation wavelengths disagree after channel mapping"
+                )
+
         self.model_frame = model_frame
 
         # check dtype consistency
