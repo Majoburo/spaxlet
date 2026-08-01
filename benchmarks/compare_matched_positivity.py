@@ -36,7 +36,13 @@ from benchmarks.ifu_parity_metrics import (
 )
 
 from lisasep import CubeComponent, IFUCube, Scene, wavelength_psf_operators
-from lisasep.constraints import CenterOn, ConstraintChain, Positivity, Symmetry
+from lisasep.constraints import (
+    CenterOn,
+    ConstraintChain,
+    Monotonicity,
+    Positivity,
+    Symmetry,
+)
 from lisasep.observation import joint_observation_optimality
 from lisasep.pipeline import morphology_information_scale
 
@@ -69,6 +75,17 @@ def _lisasep_morphology_constraint(feature, center):
             Positivity(),
             CenterOn(center=center),
         )
+    if feature.startswith("monotonic-"):
+        return ConstraintChain(
+            Monotonicity(
+                DEBLEND_SHAPE,
+                center=center,
+                neighbor_weight=feature.removeprefix("monotonic-"),
+                min_gradient=0.0,
+            ),
+            Positivity(),
+            CenterOn(center=center),
+        )
     raise ValueError(f"unknown morphology feature {feature!r}")
 
 
@@ -79,6 +96,16 @@ def _scarlet_morphology_constraint(feature, center):
     if feature == "symmetry":
         return scarlet.ConstraintChain(
             scarlet.SymmetryConstraint(center=center),
+            scarlet.PositivityConstraint(),
+            scarlet.CenterOnConstraint(center=center),
+        )
+    if feature.startswith("monotonic-"):
+        return scarlet.ConstraintChain(
+            scarlet.MonotonicityConstraint(
+                center=center,
+                neighbor_weight=feature.removeprefix("monotonic-"),
+                min_gradient=0.0,
+            ),
             scarlet.PositivityConstraint(),
             scarlet.CenterOnConstraint(center=center),
         )
@@ -152,7 +179,7 @@ def _run_scarlet(
             frame, np.ones(N_CHANNELS, dtype=fit_dtype)
         )
         image = np.asarray(start, dtype=fit_dtype)
-        if feature == "symmetry":
+        if feature != "positivity":
             image = scarlet.Parameter(
                 image,
                 name="image",
@@ -273,7 +300,13 @@ def main():
     )
     parser.add_argument(
         "--feature",
-        choices=("positivity", "symmetry"),
+        choices=(
+            "positivity",
+            "symmetry",
+            "monotonic-flat",
+            "monotonic-angle",
+            "monotonic-nearest",
+        ),
         default="positivity",
         help="opt-in morphology constraint applied identically in both codes",
     )
@@ -335,11 +368,13 @@ def main():
                 ),
                 flush=True,
             )
-    contract = (
-        "matched raw positivity factors"
-        if args.feature == "positivity"
-        else "matched raw centered-symmetry factors"
-    )
+    contract = {
+        "positivity": "matched raw positivity factors",
+        "symmetry": "matched raw centered-symmetry factors",
+        "monotonic-flat": "matched raw flat-monotonic factors",
+        "monotonic-angle": "matched raw angle-monotonic factors",
+        "monotonic-nearest": "matched raw nearest-monotonic factors",
+    }[args.feature]
     payload = {
         "contract": contract,
         "feature": args.feature,

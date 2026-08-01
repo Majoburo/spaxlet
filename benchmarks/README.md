@@ -50,6 +50,11 @@ positivity, and center-revival chain to both codes using the predeclared source
 centers. The clumpy case remains a required negative control; a good fit to the
 smooth compatible blend cannot by itself promote symmetry as a default.
 
+The same harness exposes Scarlet's existing monotonic operators as
+`--feature monotonic-flat`, `monotonic-angle`, and `monotonic-nearest`. Each
+uses the declared fixed center, zero forced radial gradient, positivity, and
+center revival. These are comparison arms, not new source defaults.
+
 `run_collaborator_reproduction.py` applies the same correction to the complete
 940-channel A/B/C experiment. It uses the same catalog-centered blobs,
 crop-then-recenter PSFs, measured variance, source labels, and 300-iteration
