@@ -7,6 +7,19 @@ from . import operator
 from .cache import Cache
 
 
+def _constraint_center(shape, center):
+    if center is None:
+        return (shape[0] // 2, shape[1] // 2)
+    if len(center) != 2 or any(
+        not isinstance(value, (int, np.integer)) for value in center
+    ):
+        raise ValueError("center must contain two integer pixel coordinates")
+    center = tuple(int(value) for value in center)
+    if any(value < 0 or value >= size for value, size in zip(center, shape)):
+        raise ValueError("center must lie inside the morphology")
+    return center
+
+
 class Constraint:
     """Constraint base class
 
@@ -193,16 +206,18 @@ class MonotonicityConstraint(Constraint):
         min_gradient=0.1,
         use_mask=False,
         fit_center_radius=0,
+        center=None,
     ):
         self.neighbor_weight = neighbor_weight
         self.min_gradient = min_gradient
         self.use_mask = use_mask
         self.fit_center = fit_center_radius > 0
         self.fit_center_radius = fit_center_radius
+        self.center = center
 
     def __call__(self, morph, step):
         shape = morph.shape
-        center = (shape[0] // 2, shape[1] // 2)
+        center = _constraint_center(shape, self.center)
         if self.fit_center:
             center = operator.get_center(morph, center, radius=self.fit_center_radius)
 
@@ -266,10 +281,20 @@ class SymmetryConstraint(Constraint):
     for a description of the parameters.
     """
 
-    def __init__(self, strength=1):
+    def __init__(self, strength=1, center=None):
         self.strength = strength
+        self.center = center
 
     def __call__(self, morph, step):
+        if self.center is not None:
+            center = _constraint_center(morph.shape, self.center)
+            return operator.prox_uncentered_symmetry(
+                morph,
+                step,
+                center=center,
+                algorithm="soft",
+                strength=self.strength,
+            )
         return operator.prox_soft_symmetry(morph, step, strength=self.strength)
 
 
@@ -277,12 +302,13 @@ class CenterOnConstraint(Constraint):
     """Sets the center pixel to a tiny non-zero value
     """
 
-    def __init__(self, tiny=1e-6):
+    def __init__(self, tiny=1e-6, center=None):
         self.tiny = tiny
+        self.center = center
 
     def __call__(self, morph, step):
         shape = morph.shape
-        center = (shape[0] // 2, shape[1] // 2)
+        center = _constraint_center(shape, self.center)
         morph[center] = max(morph[center], self.tiny)
         return morph
 

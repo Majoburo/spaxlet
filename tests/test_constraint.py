@@ -170,3 +170,49 @@ class TestUpdate(object):
         step = 0
         X = constraint(X, step)
         assert X[2, 2] > 0
+
+    def test_explicit_off_center_constraints(self):
+        shape = (17, 19)
+        center = (5, 12)
+        rows, columns = np.indices(shape, dtype=float)
+        X = np.exp(
+            -0.5
+            * ((rows - center[0]) ** 2 + (columns - center[1]) ** 2)
+            / 2.3**2
+        )
+        X[8, 8] += 2.5
+
+        expected_symmetry = scarlet.operator.prox_uncentered_symmetry(
+            X.copy(), 0, center=center, algorithm="soft", strength=1.0
+        )
+        actual_symmetry = scarlet.SymmetryConstraint(center=center)(X.copy(), 0)
+        assert_almost_equal(actual_symmetry, expected_symmetry)
+
+        expected_monotonic = scarlet.operator.prox_weighted_monotonic(
+            shape,
+            center=center,
+            neighbor_weight="angle",
+            min_gradient=0.0,
+        )(X.copy(), 0).reshape(shape)
+        actual_monotonic = scarlet.MonotonicityConstraint(
+            center=center,
+            neighbor_weight="angle",
+            min_gradient=0.0,
+        )(X.copy(), 0)
+        assert_almost_equal(actual_monotonic, expected_monotonic)
+
+        empty = np.zeros(shape)
+        revived = scarlet.CenterOnConstraint(center=center, tiny=1e-5)(empty, 0)
+        assert revived[center] == 1e-5
+        assert np.count_nonzero(revived) == 1
+
+    def test_explicit_constraint_center_validation(self):
+        X = np.ones((5, 7))
+        constraints = (
+            scarlet.SymmetryConstraint(center=(5, 2)),
+            scarlet.MonotonicityConstraint(center=(1.5, 2)),
+            scarlet.CenterOnConstraint(center=(2,)),
+        )
+        for constraint in constraints:
+            with pytest.raises(ValueError):
+                constraint(X.copy(), 0)
