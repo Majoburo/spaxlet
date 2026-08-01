@@ -1,11 +1,12 @@
-"""Reproduce lisasep positivity fits with matched Scarlet inputs and factors.
+"""Reproduce lisasep morphology-constraint fits with matched Scarlet factors.
 
 This is the first optimizer-isolation gate. Both codes receive the same six
 channels, noise realization, inverse variance, intrinsic PSF convention,
 source ordering, unit-sum starting morphologies, and all-one starting spectra.
 Scarlet uses raw ``FactorizedComponent`` objects so ``ExtendedSource``
 initialization and its implicit morphology constraints cannot confound the
-comparison.
+comparison. Positivity remains the default historical baseline; centered
+symmetry is an explicit opt-in experiment.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ from benchmarks.ifu_parity_metrics import (
 )
 
 from lisasep import CubeComponent, IFUCube, Scene, wavelength_psf_operators
-from lisasep.constraints import Positivity
+from lisasep.constraints import CenterOn, ConstraintChain, Positivity, Symmetry
 from lisasep.observation import joint_observation_optimality
 from lisasep.pipeline import morphology_information_scale
 
@@ -58,14 +59,40 @@ def _lisasep_model(operators, recovered_spectra, recovered_morphologies):
     return result
 
 
-def _run_lisasep(case, data, noise, kernels, operators, max_iter):
+def _lisasep_morphology_constraint(feature, center):
+    center = tuple(int(coordinate) for coordinate in center)
+    if feature == "positivity":
+        return Positivity()
+    if feature == "symmetry":
+        return ConstraintChain(
+            Symmetry(center=center),
+            Positivity(),
+            CenterOn(center=center),
+        )
+    raise ValueError(f"unknown morphology feature {feature!r}")
+
+
+def _scarlet_morphology_constraint(feature, center):
+    center = tuple(int(coordinate) for coordinate in center)
+    if feature == "positivity":
+        return scarlet.PositivityConstraint()
+    if feature == "symmetry":
+        return scarlet.ConstraintChain(
+            scarlet.SymmetryConstraint(center=center),
+            scarlet.PositivityConstraint(),
+            scarlet.CenterOnConstraint(center=center),
+        )
+    raise ValueError(f"unknown morphology feature {feature!r}")
+
+
+def _run_lisasep(case, data, noise, kernels, operators, max_iter, feature):
     components = [
         CubeComponent(
             np.ones(N_CHANNELS),
             start.copy(),
-            prox_morphology=Positivity(),
+            prox_morphology=_lisasep_morphology_constraint(feature, center),
         )
-        for start in case["starts"]
+        for start, center in zip(case["starts"], case["centers"])
     ]
     cube = IFUCube.from_arrays(
         data,
@@ -105,7 +132,9 @@ def _run_lisasep(case, data, noise, kernels, operators, max_iter):
     }
 
 
-def _run_scarlet(case, data, noise, kernels, max_iter, fit_dtype, scheme):
+def _run_scarlet(
+    case, data, noise, kernels, max_iter, fit_dtype, scheme, feature
+):
     data = np.asarray(data, dtype=fit_dtype)
     kernels = np.asarray(kernels, dtype=fit_dtype)
     channels = list(range(N_CHANNELS))
@@ -118,13 +147,19 @@ def _run_scarlet(case, data, noise, kernels, max_iter, fit_dtype, scheme):
         channels=channels,
     ).match(frame)
     sources = []
-    for start in case["starts"]:
+    for start, center in zip(case["starts"], case["centers"]):
         spectrum = scarlet.TabulatedSpectrum(
             frame, np.ones(N_CHANNELS, dtype=fit_dtype)
         )
-        morphology = scarlet.ImageMorphology(
-            frame, np.asarray(start, dtype=fit_dtype), resizing=False
-        )
+        image = np.asarray(start, dtype=fit_dtype)
+        if feature == "symmetry":
+            image = scarlet.Parameter(
+                image,
+                name="image",
+                step=scarlet.parameter.relative_step,
+                constraint=_scarlet_morphology_constraint(feature, center),
+            )
+        morphology = scarlet.ImageMorphology(frame, image, resizing=False)
         sources.append(scarlet.FactorizedComponent(frame, spectrum, morphology))
     blend = scarlet.Blend(sources, observation)
     started = time.perf_counter()
@@ -236,6 +271,12 @@ def main():
         choices=("adam", "nadam", "adamx", "amsgrad", "padam", "radam"),
         default="amsgrad",
     )
+    parser.add_argument(
+        "--feature",
+        choices=("positivity", "symmetry"),
+        default="positivity",
+        help="opt-in morphology constraint applied identically in both codes",
+    )
     args = parser.parse_args()
 
     kernels = np.asarray([gaussian_kernel()] * N_CHANNELS)
@@ -249,7 +290,13 @@ def main():
             (
                 "lisasep",
                 _run_lisasep(
-                    case, data, noise, kernels, operators, args.lisasep_max_iter
+                    case,
+                    data,
+                    noise,
+                    kernels,
+                    operators,
+                    args.lisasep_max_iter,
+                    args.feature,
                 ),
             ),
             (
@@ -262,6 +309,7 @@ def main():
                     args.scarlet_max_iter,
                     np.dtype(args.scarlet_dtype),
                     args.scarlet_scheme,
+                    args.feature,
                 ),
             ),
         ):
@@ -287,8 +335,14 @@ def main():
                 ),
                 flush=True,
             )
+    contract = (
+        "matched raw positivity factors"
+        if args.feature == "positivity"
+        else "matched raw centered-symmetry factors"
+    )
     payload = {
-        "contract": "matched raw positivity factors",
+        "contract": contract,
+        "feature": args.feature,
         "model_frame_psf": "per-channel 1x1 delta",
         "scarlet_dtype": args.scarlet_dtype,
         "scarlet_scheme": args.scarlet_scheme,

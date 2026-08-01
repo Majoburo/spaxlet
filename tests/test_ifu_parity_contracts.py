@@ -42,6 +42,31 @@ def _project(feature, value):
 
 
 class IFUParityContracts(unittest.TestCase):
+    def test_centered_symmetry_chain_is_finite_support_and_revives_center(self):
+        shape = (7, 9)
+        center = (2, 3)
+        value = np.zeros(shape)
+        value[0, 0] = 4
+        value[0, -1] = 7
+        value[center] = -2
+        constraint = scarlet.ConstraintChain(
+            scarlet.SymmetryConstraint(center=center),
+            scarlet.PositivityConstraint(),
+            scarlet.CenterOnConstraint(center=center, tiny=1e-5),
+        )
+
+        result = constraint(value.copy(), 0)
+        radius_y = min(center[0], shape[0] - 1 - center[0])
+        radius_x = min(center[1], shape[1] - 1 - center[1])
+        support = result[
+            center[0] - radius_y : center[0] + radius_y + 1,
+            center[1] - radius_x : center[1] + radius_x + 1,
+        ]
+        np.testing.assert_allclose(support, np.flip(support))
+        self.assertEqual(result[0, -1], value[0, -1])
+        self.assertEqual(result[center], 1e-5)
+        self.assertTrue(np.all(result >= 0))
+
     def test_operator_fixture_contract(self):
         cases = operator_morphologies()
         self.assertEqual(

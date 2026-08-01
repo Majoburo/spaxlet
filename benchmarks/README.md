@@ -44,6 +44,12 @@ per-channel delta PSF in Scarlet's model frame. The latter matters because a
 about 6.6% on the compact mocks; the delta-frame renderer matches lisasep at
 about `2e-8` relative L2.
 
+The historical positivity matrix remains the default. Pass
+`--feature symmetry` to apply the same opt-in finite-support centered-symmetry,
+positivity, and center-revival chain to both codes using the predeclared source
+centers. The clumpy case remains a required negative control; a good fit to the
+smooth compatible blend cannot by itself promote symmetry as a default.
+
 `run_collaborator_reproduction.py` applies the same correction to the complete
 940-channel A/B/C experiment. It uses the same catalog-centered blobs,
 crop-then-recenter PSFs, measured variance, source labels, and 300-iteration
