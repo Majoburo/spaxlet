@@ -20,6 +20,7 @@ import warnings
 
 import numpy as np
 import scarlet
+from scarlet.optimization import spectral_volume_value_gradient
 from astropy import units as u
 from astropy.io import fits
 
@@ -31,6 +32,7 @@ POISSON_COEFFICIENT = 0.00405419
 CATALOG_CENTERS = ((21.296, 25.784), (23.250, 24.480))
 START_SCALES = {"A": (3.0, 3.0), "B": (5.0, 2.0), "C": (2.0, 5.0)}
 OPTIMIZER_SCHEMES = ("adam", "nadam", "adamx", "amsgrad", "padam", "radam")
+OPTIMIZERS = ("adaprox", "variable_projection")
 FEATURES = ("positivity", "centroid")
 
 
@@ -47,6 +49,10 @@ def _parser():
     parser.add_argument(
         "--optimizer-scheme", choices=OPTIMIZER_SCHEMES, default="amsgrad"
     )
+    parser.add_argument("--optimizer", choices=OPTIMIZERS, default="adaprox")
+    parser.add_argument("--minimum-volume-strength", type=float, default=0.0)
+    parser.add_argument("--spectral-max-iter", type=int, default=100)
+    parser.add_argument("--spectral-tolerance", type=float, default=1e-8)
     parser.add_argument(
         "--feature",
         choices=FEATURES,
@@ -158,6 +164,8 @@ def main():
         raise ValueError("optimality_tolerance must be non-negative")
     if args.optimality_check_interval <= 0:
         raise ValueError("optimality_check_interval must be positive")
+    if args.minimum_volume_strength < 0:
+        raise ValueError("minimum_volume_strength must be non-negative")
     fit_dtype = np.dtype(args.dtype)
     _memory_checkpoint("imports", args.profile_memory)
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -276,6 +284,11 @@ def main():
             raise StopIteration("proximal optimality tolerance reached")
 
     started = time.perf_counter()
+    optimizer_arguments = (
+        {"scheme": args.optimizer_scheme}
+        if args.optimizer == "adaprox"
+        else {}
+    )
     iterations, log_likelihood = blend.fit(
         args.max_iter,
         e_rel=(
@@ -286,8 +299,12 @@ def main():
         project_initial=True,
         normalize_initial_factors=True,
         channel_chunk_size=args.channel_chunk_size,
-        scheme=args.optimizer_scheme,
+        optimizer=args.optimizer,
+        minimum_volume_strength=args.minimum_volume_strength,
+        spectral_max_iter=args.spectral_max_iter,
+        spectral_tolerance=args.spectral_tolerance,
         callback=check_optimality,
+        **optimizer_arguments
     )
     runtime = time.perf_counter() - started
     _memory_checkpoint("fit", args.profile_memory)
@@ -321,6 +338,12 @@ def main():
 
     model = np.asarray(observation.render(blend.get_model()), dtype=float)
     residual = data - model
+    data_log_likelihood = -float(observation.log_norm) - 0.5 * float(
+        np.sum(observation.weights * residual**2)
+    )
+    spectral_volume_penalty, _ = spectral_volume_value_gradient(
+        np.stack(spectra, axis=1), args.minimum_volume_strength
+    )
     residual_score = residual_metrics(residual, 1.0 / variance)
     source_scores = []
     for spectrum, reference_spectrum, morphology, reference_morphology in zip(
@@ -371,7 +394,9 @@ def main():
         "optimality_tolerance": args.optimality_tolerance,
         "optimality_check_interval": args.optimality_check_interval,
         "optimality_checks": optimality_checks,
-        "log_likelihood": float(log_likelihood),
+        "log_likelihood": data_log_likelihood,
+        "regularized_log_objective": float(log_likelihood),
+        "spectral_volume_penalty": spectral_volume_penalty,
         "final_relative_objective_change": relative_change,
         "initial_projection_relative_l2": float(
             blend.initial_projection_relative_l2
@@ -406,6 +431,10 @@ def main():
         "fit_dtype": args.dtype,
         "channel_chunk_size": args.channel_chunk_size,
         "optimizer_scheme": args.optimizer_scheme,
+        "optimizer": args.optimizer,
+        "minimum_volume_strength": args.minimum_volume_strength,
+        "spectral_max_iter": args.spectral_max_iter,
+        "spectral_tolerance": args.spectral_tolerance,
         "optimality_runtime_seconds": optimality_runtime,
         "parameter_relative_projected_gradient": (
             optimality.relative_projected_gradient
@@ -464,6 +493,8 @@ def main():
         psf_centering=np.asarray("crop_then_recenter"),
         model_frame_psf=np.asarray("per-channel_1x1_delta"),
         feature=np.asarray(args.feature),
+        optimizer=np.asarray(args.optimizer),
+        minimum_volume_strength=args.minimum_volume_strength,
         kernel_size=args.kernel_size,
         structural_sed1_lower=mixing_envelopes[0].spectrum_lower,
         structural_sed1_upper=mixing_envelopes[0].spectrum_upper,
@@ -482,7 +513,7 @@ def main():
         "|rho1|={:.4f}".format(
             args.start,
             runtime,
-            log_likelihood,
+            data_log_likelihood,
             residual_score["chi_square_per_voxel"],
             residual_score["power_spectral_entropy"],
             residual_score["lag1_autocorrelation"],

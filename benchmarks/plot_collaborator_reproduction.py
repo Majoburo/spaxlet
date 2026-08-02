@@ -209,7 +209,10 @@ def _plot_residual_and_metrics(values, output, dpi):
             "projected gradient",
             "{:.3g}".format(report["parameter_relative_projected_gradient"]),
         ),
-        ("optimizer", report["optimizer_scheme"]),
+        (
+            "optimizer",
+            report.get("optimizer", report["optimizer_scheme"]),
+        ),
         ("dtype / chunk", "{} / {}".format(report["fit_dtype"], report["channel_chunk_size"])),
     ]
     axes[1].axis("off")

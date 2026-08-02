@@ -26,6 +26,10 @@ run_label="${SCARLET_RUN_LABEL:-matched300}"
 fit_dtype="${SCARLET_FIT_DTYPE:-float32}"
 channel_chunk_size="${SCARLET_CHANNEL_CHUNK_SIZE:-64}"
 optimizer_scheme="${SCARLET_OPTIMIZER_SCHEME:-amsgrad}"
+optimizer="${SCARLET_OPTIMIZER:-adaprox}"
+minimum_volume_strength="${SCARLET_MINIMUM_VOLUME_STRENGTH:-0}"
+spectral_max_iter="${SCARLET_SPECTRAL_MAX_ITER:-100}"
+spectral_tolerance="${SCARLET_SPECTRAL_TOLERANCE:-1e-8}"
 feature="${SCARLET_FEATURE:-positivity}"
 optimality_tolerance="${SCARLET_OPTIMALITY_TOLERANCE:-1e-4}"
 optimality_check_interval="${SCARLET_OPTIMALITY_CHECK_INTERVAL:-100}"
@@ -41,7 +45,11 @@ output_dir="${lisasep_root}/benchmark_artifacts/collaborator_blend_comparison/sc
   --relative-tolerance 1e-11 \
   --dtype "${fit_dtype}" \
   --channel-chunk-size "${channel_chunk_size}" \
+  --optimizer "${optimizer}" \
   --optimizer-scheme "${optimizer_scheme}" \
+  --minimum-volume-strength "${minimum_volume_strength}" \
+  --spectral-max-iter "${spectral_max_iter}" \
+  --spectral-tolerance "${spectral_tolerance}" \
   --feature "${feature}" \
   --optimality-tolerance "${optimality_tolerance}" \
   --optimality-check-interval "${optimality_check_interval}"

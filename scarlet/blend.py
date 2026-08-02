@@ -97,6 +97,7 @@ class Blend(CombinedComponent):
         self.loss = []
         self._noise_factor = 0
         self._channel_chunk_size = None
+        self._spectral_volume_strength = 0.0
 
     def fit(
         self,
@@ -107,6 +108,12 @@ class Blend(CombinedComponent):
         project_initial=False,
         normalize_initial_factors=False,
         channel_chunk_size=None,
+        optimizer="adaprox",
+        projected_step=None,
+        projected_max_backtracks=30,
+        minimum_volume_strength=0.0,
+        spectral_max_iter=100,
+        spectral_tolerance=1e-8,
         **alg_kwargs
     ):
         """Fit the model for each source to the data
@@ -138,6 +145,23 @@ class Blend(CombinedComponent):
             Render and score this many observation channels at a time. This
             lowers peak memory for compatible renderers without changing the
             objective.
+        optimizer: {"adaprox", "variable_projection"}
+            Numerical optimizer. The opt-in variable-projection path exactly
+            profiles non-negative tabulated spectra and takes monotone
+            scalar-metric projected morphology steps. It currently supports
+            factorized components and channel-selection renderers.
+        projected_step: float or None
+            Initial scalar morphology step for variable projection. ``None``
+            uses each image parameter's declared step.
+        projected_max_backtracks: int
+            Maximum halvings in a projected morphology line search.
+        minimum_volume_strength: float
+            Strength of an opt-in normalized spectral log-volume penalty.
+            Unlike a post-solve veto, this is optimized inside the nonlinear
+            spectral subproblem and therefore genuinely steers the factors.
+        spectral_max_iter, spectral_tolerance: int, float
+            Inner spectral optimizer controls when volume regularization is
+            active. They do not affect the exact unregularized solve.
         """
         if not isinstance(project_initial, (bool, np.bool_)):
             raise TypeError("project_initial must be boolean")
@@ -238,6 +262,43 @@ class Blend(CombinedComponent):
         it = 0
         self._noise_factor = noise_factor
         self._channel_chunk_size = channel_chunk_size
+        self._spectral_volume_strength = float(minimum_volume_strength)
+        if optimizer not in ("adaprox", "variable_projection"):
+            raise ValueError(
+                "optimizer must be 'adaprox' or 'variable_projection'"
+            )
+        if optimizer == "adaprox":
+            if minimum_volume_strength != 0.0:
+                raise ValueError(
+                    "minimum_volume_strength requires optimizer='variable_projection'"
+                )
+        else:
+            from .optimization import fit_variable_projection
+
+            result = fit_variable_projection(
+                self,
+                max_iter=max_iter,
+                e_rel=e_rel,
+                min_iter=min_iter,
+                callback=alg_kwargs.pop("callback", None),
+                projected_step=projected_step,
+                max_backtracks=projected_max_backtracks,
+                volume_strength=self._spectral_volume_strength,
+                spectral_max_iter=spectral_max_iter,
+                spectral_tolerance=spectral_tolerance,
+            )
+            if alg_kwargs:
+                raise TypeError(
+                    "unsupported variable-projection keywords: {}".format(
+                        ", ".join(sorted(alg_kwargs))
+                    )
+                )
+            logger.info(
+                "scarlet variable projection ran for {0} iterations to logL = {1}".format(
+                    result[0], result[1]
+                )
+            )
+            return result
         while it < max_iter:
             try:
                 X = self.parameters + tuple(
@@ -466,7 +527,38 @@ class Blend(CombinedComponent):
         gradients = gradient_function(*parameters)
         if len(free_indices) == 1 and not isinstance(gradients, tuple):
             gradients = (gradients,)
+        gradients = list(gradients)
         objective = float(self._objective_func(*parameters))
+        if self._spectral_volume_strength > 0.0:
+            from .optimization import spectral_volume_value_gradient
+
+            spectrum_parameters = [
+                source.spectrum.parameters[0] for source in self.sources
+            ]
+            spectra = np.stack(
+                [np.asarray(parameter, dtype=float) for parameter in spectrum_parameters],
+                axis=1,
+            )
+            volume, volume_gradients = spectral_volume_value_gradient(
+                spectra, self._spectral_volume_strength
+            )
+            objective += volume
+            free_position = {
+                parameter_index: gradient_index
+                for gradient_index, parameter_index in enumerate(free_indices)
+            }
+            for source_index, spectrum_parameter in enumerate(spectrum_parameters):
+                parameter_index = next(
+                    index
+                    for index, parameter in enumerate(parameters)
+                    if parameter is spectrum_parameter
+                )
+                if parameter_index in free_position:
+                    gradient_index = free_position[parameter_index]
+                    gradients[gradient_index] = (
+                        np.asarray(gradients[gradient_index], dtype=float)
+                        + volume_gradients[:, source_index]
+                    )
         scale = max(
             abs(objective), weighted_data_energy, np.finfo(float).tiny
         )
