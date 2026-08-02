@@ -33,7 +33,7 @@ CATALOG_CENTERS = ((21.296, 25.784), (23.250, 24.480))
 START_SCALES = {"A": (3.0, 3.0), "B": (5.0, 2.0), "C": (2.0, 5.0)}
 OPTIMIZER_SCHEMES = ("adam", "nadam", "adamx", "amsgrad", "padam", "radam")
 OPTIMIZERS = ("adaprox", "variable_projection")
-FEATURES = ("positivity", "centroid")
+FEATURES = ("positivity", "centroid", "centroid_psf")
 
 
 def _parser():
@@ -141,7 +141,7 @@ def _morphology_parameter(value, feature, center):
     image = np.asarray(value).copy()
     if feature == "positivity":
         return image
-    if feature == "centroid":
+    if feature in ("centroid", "centroid_psf"):
         constraint = scarlet.DykstraConstraintChain(
             scarlet.CentroidConstraint(center),
             scarlet.PositivityConstraint(),
@@ -193,6 +193,15 @@ def main():
         kernels, retained_flux = scarlet.crop_psf_kernels(kernels, args.kernel_size)
     kernels, removed_shift = scarlet.recenter_psf_kernels(kernels)
     kernels = np.asarray(kernels, dtype=fit_dtype)
+    centroid_offset = (
+        np.median(removed_shift, axis=0)
+        if args.feature == "centroid_psf"
+        else np.zeros(2)
+    )
+    fit_centers = tuple(
+        tuple(np.asarray(center, dtype=float) + centroid_offset)
+        for center in CATALOG_CENTERS
+    )
     _memory_checkpoint("corrected_psf", args.profile_memory)
 
     variance = np.asarray(
@@ -226,10 +235,10 @@ def main():
 
     scales = START_SCALES[args.start]
     starting_morphologies = [
-        blob(center, scale) for center, scale in zip(CATALOG_CENTERS, scales)
+        blob(center, scale) for center, scale in zip(fit_centers, scales)
     ]
     sources = []
-    for morphology_start, center in zip(starting_morphologies, CATALOG_CENTERS):
+    for morphology_start, center in zip(starting_morphologies, fit_centers):
         spectrum = scarlet.TabulatedSpectrum(
             frame, np.ones(data.shape[0], dtype=fit_dtype)
         )
@@ -379,10 +388,16 @@ def main():
         "scarlet": _repository_provenance(),
         "feature": args.feature,
         "constraint_centers_yx": (
-            [list(center) for center in CATALOG_CENTERS]
-            if args.feature == "centroid"
+            [list(center) for center in fit_centers]
+            if args.feature in ("centroid", "centroid_psf")
             else None
         ),
+        "centroid_coordinate_frame": (
+            "catalog_plus_median_removed_psf_centroid"
+            if args.feature == "centroid_psf"
+            else "catalog"
+        ),
+        "centroid_offset_yx": centroid_offset.tolist(),
         "start": args.start,
         "start_scales": list(scales),
         "catalog_order": list(order),
@@ -493,6 +508,8 @@ def main():
         psf_centering=np.asarray("crop_then_recenter"),
         model_frame_psf=np.asarray("per-channel_1x1_delta"),
         feature=np.asarray(args.feature),
+        constraint_centers_yx=np.asarray(fit_centers),
+        centroid_offset_yx=centroid_offset,
         optimizer=np.asarray(args.optimizer),
         minimum_volume_strength=args.minimum_volume_strength,
         kernel_size=args.kernel_size,

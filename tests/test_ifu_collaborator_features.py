@@ -31,6 +31,18 @@ class IFUCollaboratorFeatureTest(unittest.TestCase):
         )
         np.testing.assert_allclose(measured, center, rtol=0, atol=2e-11)
 
+    def test_psf_frame_centroid_uses_the_supplied_corrected_center(self):
+        value = np.arange(20, dtype=float).reshape(4, 5) + 1
+        center = (1.7, 2.6)
+        parameter = _morphology_parameter(value, "centroid_psf", center)
+        projected = parameter.constraint(parameter.copy(), 1)
+        rows, columns = np.indices(projected.shape, dtype=float)
+        measured = (
+            float(np.sum(projected * rows) / np.sum(projected)),
+            float(np.sum(projected * columns) / np.sum(projected)),
+        )
+        np.testing.assert_allclose(measured, center, rtol=0, atol=2e-11)
+
     def test_unknown_feature_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "unknown morphology feature"):
             _morphology_parameter(np.ones((3, 3)), "volume", (1, 1))
