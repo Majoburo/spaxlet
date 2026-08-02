@@ -74,10 +74,20 @@ def spectral_volume_value_gradient(spectra, strength):
         return 0.0, gradient
     normalized = spectra / norms
     gram = normalized.T @ normalized + 1e-12 * np.eye(spectra.shape[1])
-    sign, logdet = np.linalg.slogdet(gram)
-    if sign <= 0:
-        return 0.0, gradient
-    normalized_gradient = 2.0 * normalized @ np.linalg.inv(gram)
+    if gram.shape == (2, 2):
+        determinant = float(gram[0, 0] * gram[1, 1] - gram[0, 1] ** 2)
+        if determinant <= 0.0:
+            return 0.0, gradient
+        logdet = np.log(determinant)
+        inverse = np.asarray(
+            [[gram[1, 1], -gram[0, 1]], [-gram[1, 0], gram[0, 0]]]
+        ) / determinant
+    else:
+        sign, logdet = np.linalg.slogdet(gram)
+        if sign <= 0:
+            return 0.0, gradient
+        inverse = np.linalg.inv(gram)
+    normalized_gradient = 2.0 * normalized @ inverse
     for source in range(spectra.shape[1]):
         direction = normalized[:, source]
         value = normalized_gradient[:, source]
