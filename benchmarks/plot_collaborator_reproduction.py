@@ -108,10 +108,12 @@ def _load(args):
 
 def _plot_spectra(values, output, dpi):
     figure, axes = plt.subplots(
-        2, 2, figsize=(12, 7), sharex="col", constrained_layout=True
+        3, 2, figsize=(12, 9.5), sharex="col", constrained_layout=True
     )
     for source in range(2):
         score = values["report"]["sources"][source]["spectrum"]
+        truth = values["truth_spectra"][source]
+        fitted = values["spectra"][source]
         lower, upper = values["spectral_envelopes"][source]
         axes[0, source].fill_between(
             values["wavelength"],
@@ -123,14 +125,14 @@ def _plot_spectra(values, output, dpi):
         )
         axes[0, source].plot(
             values["wavelength"],
-            values["truth_spectra"][source],
+            truth,
             color="black",
             lw=1.2,
             label="truth",
         )
         axes[0, source].plot(
             values["wavelength"],
-            values["spectra"][source],
+            fitted,
             color="#0072B2",
             lw=0.9,
             label="Scarlet",
@@ -144,15 +146,24 @@ def _plot_spectra(values, output, dpi):
         axes[0, source].legend(frameon=False, fontsize=8)
         axes[1, source].axhline(0, color="black", lw=0.7)
         axes[1, source].plot(
+            values["wavelength"],
+            fitted - truth,
+            color="#0072B2",
+            lw=0.7,
+        )
+        axes[1, source].set_ylabel("Scarlet − truth\n(source flux)")
+        axes[1, source].grid(alpha=0.2)
+        axes[2, source].axhline(0, color="black", lw=0.7)
+        axes[2, source].plot(
             score["binned_wavelength"],
             100 * np.asarray(score["binned_fractional_error"]),
             color="#D55E00",
             marker="o",
             ms=2.5,
         )
-        axes[1, source].set_xlabel("wavelength (µm)")
-        axes[1, source].set_ylabel("24-bin flux error (%)")
-        axes[1, source].grid(alpha=0.2)
+        axes[2, source].set_xlabel("wavelength (µm)")
+        axes[2, source].set_ylabel("24-bin (Scarlet − truth) / truth (%)")
+        axes[2, source].grid(alpha=0.2)
     figure.suptitle(
         "Scarlet collaborator recovery; envelope is structural, not ±1σ"
     )
