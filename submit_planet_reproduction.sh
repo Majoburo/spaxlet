@@ -37,8 +37,6 @@ python="/nobackup/user/bustam1/lisastack_a6000/jwst/venv-scarlet/bin/python"
   --max-iter "${max_iter}" \
   --relative-tolerance "${relative_tolerance}"
 
-"${python}" -m benchmarks.plot_planet_reproduction \
+"${python}" -m benchmarks.plot_planet \
   --product "${output_dir}/scarlet_planet_recovery.npz" \
-  --data-root "${data_root}" \
-  --output-dir "${output_dir}" \
-  --kernel-size "${kernel_size}"
+  --output-dir "${output_dir}"
