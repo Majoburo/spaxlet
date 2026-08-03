@@ -15,20 +15,24 @@ import json
 from pathlib import Path
 import resource
 import subprocess
+import sys
 import time
 import warnings
 
 import numpy as np
 import scarlet
-from scarlet.optimization import spectral_volume_value_gradient
-from astropy import units as u
+from scarlet.optimization import parameter_optimization_diagnostics
 from astropy.io import fits
 
-from benchmarks.ifu_parity_metrics import (
+from benchmarks.collaborator_metrics import (
     morphology_metrics,
     residual_metrics,
     spectral_metrics,
     translate_morphology,
+)
+from benchmarks.psf_preprocessing import (
+    crop_psf_kernels,
+    recenter_psf_kernels,
 )
 
 
@@ -55,9 +59,6 @@ def _parser():
         "--optimizer-scheme", choices=OPTIMIZER_SCHEMES, default="amsgrad"
     )
     parser.add_argument("--optimizer", choices=OPTIMIZERS, default="adaprox")
-    parser.add_argument("--minimum-volume-strength", type=float, default=0.0)
-    parser.add_argument("--spectral-max-iter", type=int, default=100)
-    parser.add_argument("--spectral-tolerance", type=float, default=1e-8)
     parser.add_argument(
         "--feature",
         choices=FEATURES,
@@ -101,16 +102,18 @@ def _memory_checkpoint(label, enabled):
     if not enabled:
         return
     gc.collect()
-    current_kib = None
-    for line in Path("/proc/self/status").read_text().splitlines():
-        if line.startswith("VmRSS:"):
-            current_kib = int(line.split()[1])
-            break
-    peak_kib = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    proc_status = Path("/proc/self/status")
+    current_mib = None
+    if proc_status.exists():
+        for line in proc_status.read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                current_mib = int(line.split()[1]) / 1024.0
+                break
+    peak = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    peak_mib = peak / (1024.0**2 if sys.platform == "darwin" else 1024.0)
+    current = " unavailable" if current_mib is None else "={:.1f}MiB".format(current_mib)
     print(
-        "MEMORY {} current={:.1f}MiB peak={:.1f}MiB".format(
-            label, current_kib / 1024.0, peak_kib / 1024.0
-        ),
+        "MEMORY {} current{} peak={:.1f}MiB".format(label, current, peak_mib),
         flush=True,
     )
 
@@ -169,15 +172,13 @@ def main():
         raise ValueError("optimality_tolerance must be non-negative")
     if args.optimality_check_interval <= 0:
         raise ValueError("optimality_check_interval must be positive")
-    if args.minimum_volume_strength < 0:
-        raise ValueError("minimum_volume_strength must be non-negative")
     fit_dtype = np.dtype(args.dtype)
     _memory_checkpoint("imports", args.profile_memory)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     truth_path = args.data_root / "morphology_galaxy_cube_004.fits"
     psf_path = args.data_root / "nirspec_ifu_PRISM_CLEAR_allwave.cube.fits"
     with fits.open(truth_path) as hdul:
-        data = np.asarray(hdul["SCI"].data, dtype=fit_dtype)
+        raw_data = np.asarray(hdul["SCI"].data, dtype=fit_dtype)
         table = hdul["TRUTH_SPECTRA"].data
         wavelength = np.asarray(table["wavelength_um"], dtype=float)
         reference_spectra = (
@@ -191,12 +192,12 @@ def main():
     with fits.open(psf_path) as hdul:
         kernels = np.asarray(hdul["DET_SAMP"].data, dtype=fit_dtype)
     _memory_checkpoint("raw_psf", args.profile_memory)
-    if kernels.shape[0] != data.shape[0]:
+    if kernels.shape[0] != raw_data.shape[0]:
         raise ValueError("PSF and science cube must share the spectral grid")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        kernels, retained_flux = scarlet.crop_psf_kernels(kernels, args.kernel_size)
-    kernels, removed_shift = scarlet.recenter_psf_kernels(kernels)
+        kernels, retained_flux = crop_psf_kernels(kernels, args.kernel_size)
+    kernels, removed_shift = recenter_psf_kernels(kernels)
     kernels = np.asarray(kernels, dtype=fit_dtype)
     morphology_reference_offset = np.median(removed_shift, axis=0)
     centroid_offset = (
@@ -221,25 +222,31 @@ def main():
     _memory_checkpoint("corrected_psf", args.profile_memory)
 
     variance = np.asarray(
-        READ_VARIANCE + POISSON_COEFFICIENT * np.maximum(data, 0.0),
+        READ_VARIANCE + POISSON_COEFFICIENT * np.maximum(raw_data, 0.0),
         dtype=fit_dtype,
     )
-    physical_wavelengths = wavelength * u.um
+    valid = np.isfinite(raw_data) & np.isfinite(variance) & (variance > 0)
+    data = np.zeros(raw_data.shape, dtype=fit_dtype)
+    data[valid] = raw_data[valid]
+    weights = np.zeros(raw_data.shape, dtype=fit_dtype)
+    weights[valid] = 1.0 / variance[valid]
+    mask_summary = {
+        "voxels": int(valid.size),
+        "valid": int(np.count_nonzero(valid)),
+        "invalid": int(np.count_nonzero(~valid)),
+    }
     channels = ["ch{:04d}".format(index) for index in range(data.shape[0])]
     delta_psf = scarlet.DeltaPSF(data.shape[0], dtype=fit_dtype)
     frame = scarlet.Frame(
         data.shape,
         psf=delta_psf,
         channels=channels,
-        wavelengths=physical_wavelengths,
     )
-    observation = scarlet.Observation.from_ifu_arrays(
+    observation = scarlet.Observation(
         data,
-        physical_wavelengths,
-        variance,
         psf=scarlet.ImagePSF(kernels),
         channels=channels,
-        dtype=fit_dtype,
+        weights=weights,
     ).match(frame)
     _memory_checkpoint("matched_observation", args.profile_memory)
 
@@ -270,7 +277,10 @@ def main():
         observation.render(scarlet.Blend(sources, observation).get_model()),
         dtype=float,
     )
-    initial_chi_square = float(np.mean((data - initial_model) ** 2 / variance))
+    initial_chi_square = float(
+        np.sum(weights * (data - initial_model) ** 2)
+        / max(np.count_nonzero(valid), 1)
+    )
     del initial_model
     _memory_checkpoint("initial_model", args.profile_memory)
     blend = scarlet.Blend(sources, observation)
@@ -286,7 +296,7 @@ def main():
         ):
             return
         check_started = time.perf_counter()
-        diagnostic = blend.parameter_optimization_diagnostics()
+        diagnostic = parameter_optimization_diagnostics(blend)
         periodic_optimality_runtime += time.perf_counter() - check_started
         optimality_checks.append(
             {
@@ -321,20 +331,15 @@ def main():
             if args.optimality_tolerance is not None
             else args.relative_tolerance
         ),
-        project_initial=True,
-        normalize_initial_factors=True,
         channel_chunk_size=args.channel_chunk_size,
         optimizer=args.optimizer,
-        minimum_volume_strength=args.minimum_volume_strength,
-        spectral_max_iter=args.spectral_max_iter,
-        spectral_tolerance=args.spectral_tolerance,
         callback=check_optimality,
         **optimizer_arguments
     )
     runtime = time.perf_counter() - started
     _memory_checkpoint("fit", args.profile_memory)
     optimality_started = time.perf_counter()
-    optimality = blend.parameter_optimization_diagnostics()
+    optimality = parameter_optimization_diagnostics(blend)
     optimality_runtime = (
         periodic_optimality_runtime + time.perf_counter() - optimality_started
     )
@@ -357,19 +362,12 @@ def main():
     order = _catalog_order(morphologies, catalog_reference_centers)
     spectra = [spectra[index] for index in order]
     morphologies = [morphologies[index] for index in order]
-    ordered_sources = [sources[index] for index in order]
-    mixing_intervals = scarlet.bilinear_mixing_intervals(ordered_sources)
-    mixing_envelopes = scarlet.pairwise_mixing_envelopes(ordered_sources)
-
     model = np.asarray(observation.render(blend.get_model()), dtype=float)
     residual = data - model
     data_log_likelihood = -float(observation.log_norm) - 0.5 * float(
         np.sum(observation.weights * residual**2)
     )
-    spectral_volume_penalty, _ = spectral_volume_value_gradient(
-        np.stack(spectra, axis=1), args.minimum_volume_strength
-    )
-    residual_score = residual_metrics(residual, 1.0 / variance)
+    residual_score = residual_metrics(residual, observation.weights)
     source_scores = []
     for spectrum, reference_spectrum, morphology, reference_morphology in zip(
         spectra,
@@ -434,7 +432,6 @@ def main():
         "optimality_checks": optimality_checks,
         "log_likelihood": data_log_likelihood,
         "regularized_log_objective": float(log_likelihood),
-        "spectral_volume_penalty": spectral_volume_penalty,
         "final_relative_objective_change": relative_change,
         "initial_projection_relative_l2": float(
             blend.initial_projection_relative_l2
@@ -464,15 +461,12 @@ def main():
             "wavelength_channels": int(wavelength.size),
             "wavelength_min": float(wavelength[0]),
             "wavelength_max": float(wavelength[-1]),
-            "mask_summary": observation.ifu_mask_summary,
+            "mask_summary": mask_summary,
         },
         "fit_dtype": args.dtype,
         "channel_chunk_size": args.channel_chunk_size,
         "optimizer_scheme": args.optimizer_scheme,
         "optimizer": args.optimizer,
-        "minimum_volume_strength": args.minimum_volume_strength,
-        "spectral_max_iter": args.spectral_max_iter,
-        "spectral_tolerance": args.spectral_tolerance,
         "optimality_runtime_seconds": optimality_runtime,
         "parameter_relative_projected_gradient": (
             optimality.relative_projected_gradient
@@ -483,36 +477,6 @@ def main():
         "morphology_relative_projected_gradient": (
             optimality.morphology_relative_projected_gradient
         ),
-        "structural_mixing": {
-            "interpretation": (
-                "exact pairwise sensitivity floor; not posterior or +/-1 sigma"
-            ),
-            "intervals": [
-                {
-                    "donor": interval.donor,
-                    "receiver": interval.receiver,
-                    "delta_min": interval.delta_min,
-                    "delta_max": interval.delta_max,
-                }
-                for interval in mixing_intervals
-            ],
-            "components": [
-                {
-                    "component": envelope.component,
-                    "total_flux_min": envelope.total_flux_min,
-                    "total_flux_max": envelope.total_flux_max,
-                    "total_flux_min_fraction": (
-                        envelope.total_flux_min
-                        / max(float(np.sum(spectra[index])), np.finfo(float).tiny)
-                    ),
-                    "total_flux_max_fraction": (
-                        envelope.total_flux_max
-                        / max(float(np.sum(spectra[index])), np.finfo(float).tiny)
-                    ),
-                }
-                for index, envelope in enumerate(mixing_envelopes)
-            ],
-        },
     }
     output = args.output_dir / "scarlet_matched_start{}.npz".format(args.start)
     np.savez_compressed(
@@ -525,9 +489,9 @@ def main():
         iterations=int(iterations),
         runtime_seconds=runtime,
         collapsed_whitened_residual=np.sum(
-            residual / np.sqrt(variance), axis=0
+            residual * np.sqrt(weights), axis=0
         )
-        / np.sqrt(data.shape[0]),
+        / np.sqrt(np.maximum(np.count_nonzero(weights, axis=0), 1)),
         psf_centering=np.asarray("crop_then_recenter"),
         model_frame_psf=np.asarray("per-channel_1x1_delta"),
         feature=np.asarray(args.feature),
@@ -535,16 +499,7 @@ def main():
         centroid_offset_yx=centroid_offset,
         morphology_reference_offset_yx=morphology_reference_offset,
         optimizer=np.asarray(args.optimizer),
-        minimum_volume_strength=args.minimum_volume_strength,
         kernel_size=args.kernel_size,
-        structural_sed1_lower=mixing_envelopes[0].spectrum_lower,
-        structural_sed1_upper=mixing_envelopes[0].spectrum_upper,
-        structural_sed2_lower=mixing_envelopes[1].spectrum_lower,
-        structural_sed2_upper=mixing_envelopes[1].spectrum_upper,
-        structural_morph1_lower=mixing_envelopes[0].morphology_lower,
-        structural_morph1_upper=mixing_envelopes[0].morphology_upper,
-        structural_morph2_lower=mixing_envelopes[1].morphology_lower,
-        structural_morph2_upper=mixing_envelopes[1].morphology_upper,
     )
     (args.output_dir / "scarlet_matched_metrics.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n"

@@ -6,7 +6,11 @@ import warnings
 import numpy as np
 from scipy.ndimage import shift
 
-import scarlet
+from benchmarks.psf_preprocessing import (
+    crop_psf_kernels,
+    psf_centroids,
+    recenter_psf_kernels,
+)
 
 
 def _gaussian_stack(sigmas, size=9):
@@ -27,7 +31,7 @@ class IFUPSFPreprocessingTest(unittest.TestCase):
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            cropped, retained = scarlet.crop_psf_kernels(kernels, 7)
+            cropped, retained = crop_psf_kernels(kernels, 7)
 
         np.testing.assert_allclose(np.sum(cropped, axis=(1, 2)), 1)
         np.testing.assert_allclose(retained, 2 / np.array([2.2, 2.4]))
@@ -44,20 +48,20 @@ class IFUPSFPreprocessingTest(unittest.TestCase):
         displaced = np.maximum(displaced, 0)
         displaced /= np.sum(displaced, axis=(1, 2))[:, None, None]
 
-        centered, removed = scarlet.recenter_psf_kernels(displaced)
+        centered, removed = recenter_psf_kernels(displaced)
 
         self.assertGreater(np.max(np.abs(removed)), 0.2)
-        self.assertLess(np.max(np.abs(scarlet.psf_centroids(centered))), 0.02)
+        self.assertLess(np.max(np.abs(psf_centroids(centered))), 0.02)
         np.testing.assert_allclose(np.sum(centered, axis=(1, 2)), 1)
 
     def test_invalid_psfs_and_crop_sizes_fail_early(self):
         valid = _gaussian_stack((1.0,))
         invalid_calls = (
-            lambda: scarlet.psf_centroids(np.zeros((1, 3, 3))),
-            lambda: scarlet.psf_centroids(np.full((1, 3, 3), np.nan)),
-            lambda: scarlet.crop_psf_kernels(valid, 4),
-            lambda: scarlet.crop_psf_kernels(valid, 11),
-            lambda: scarlet.crop_psf_kernels(valid[:, :, :-1], 7),
+            lambda: psf_centroids(np.zeros((1, 3, 3))),
+            lambda: psf_centroids(np.full((1, 3, 3), np.nan)),
+            lambda: crop_psf_kernels(valid, 4),
+            lambda: crop_psf_kernels(valid, 11),
+            lambda: crop_psf_kernels(valid[:, :, :-1], 7),
         )
         for call in invalid_calls:
             with self.subTest(call=call):

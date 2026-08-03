@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from benchmarks.ifu_parity_metrics import (
+from benchmarks.collaborator_metrics import (
     centroid,
     morphology_metrics,
     normalized_morphology,

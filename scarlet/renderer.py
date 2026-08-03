@@ -1,15 +1,11 @@
 import autograd.numpy as np
-import numpy as onp
 from autograd.extend import defvjp, primitive
-from numbers import Integral
-from scipy import fft as scipy_fft
 
 from .model import Model
 from . import interpolation
 from .parameter import Parameter
 from . import fft
 from .bbox import Box, overlapped_slices
-from .ifu import spatial_interpolation_weights
 from scarlet.operators_pybind11 import apply_filter
 
 
@@ -87,12 +83,7 @@ class Renderer(Model):
         return model[self.channel_map]
 
     def map_model_psf_channels(self, psf):
-        """Select model PSFs on the observation's channel grid.
-
-        A singleton PSF is shared by every channel. Otherwise the PSF must
-        declare one image per model-frame channel and follows the same channel
-        mapping as the model cube.
-        """
+        """Select the model PSF planes used by this observation."""
         if psf.shape[0] == 1:
             return psf
         if psf.shape[0] != self.model_frame.C:
@@ -102,12 +93,6 @@ class Renderer(Model):
         return self.map_channels(psf)
 
     def render_channels(self, model, start, stop, *parameters):
-        """Render a contiguous block of observation channels.
-
-        Renderers that can avoid materializing the full observation model
-        override this method. The base implementation is deliberately absent
-        so callers never silently assume that a renderer is memory bounded.
-        """
         raise NotImplementedError(
             "{} does not support channel-chunked rendering".format(
                 type(self).__name__
@@ -196,73 +181,6 @@ def _grad_match_shape(upstream_grad, model, data_frame, slices):
 defvjp(match_shape, _grad_match_shape)
 
 
-@primitive
-def _varying_psf_convolve(image, weights, kernel_fft, kernel_shape):
-    """Cached-FFT field convolution with a separately registered adjoint."""
-    image = onp.asarray(image)
-    weights = onp.asarray(weights)
-    image_shape = image.shape[-2:]
-    work_shape = tuple(
-        image_size + kernel_size - 1
-        for image_size, kernel_size in zip(image_shape, kernel_shape)
-    )
-    crop_start = tuple((size - 1) // 2 for size in kernel_shape)
-    crop = tuple(
-        slice(start, start + size)
-        for start, size in zip(crop_start, image_shape)
-    )
-    weighted = image[:, None] * weights[None]
-    transformed = scipy_fft.rfftn(weighted, s=work_shape, axes=(-2, -1))
-    full = scipy_fft.irfftn(
-        transformed * kernel_fft,
-        s=work_shape,
-        axes=(-2, -1),
-    )
-    return onp.sum(full[(slice(None), slice(None), *crop)], axis=1)
-
-
-def _varying_psf_adjoint(value, weights, kernel_fft, kernel_shape):
-    """Exact transpose of :func:`_varying_psf_convolve`."""
-    value = onp.asarray(value)
-    weights = onp.asarray(weights)
-    image_shape = value.shape[-2:]
-    work_shape = tuple(
-        image_size + kernel_size - 1
-        for image_size, kernel_size in zip(image_shape, kernel_shape)
-    )
-    crop_start = tuple((size - 1) // 2 for size in kernel_shape)
-    crop = tuple(
-        slice(start, start + size)
-        for start, size in zip(crop_start, image_shape)
-    )
-    embedded = onp.zeros(
-        (value.shape[0], 1, *work_shape),
-        dtype=onp.result_type(value.dtype, kernel_fft.real.dtype),
-    )
-    embedded[(slice(None), slice(None), *crop)] = value[:, None]
-    transformed = scipy_fft.rfftn(embedded, s=work_shape, axes=(-2, -1))
-    full = scipy_fft.irfftn(
-        transformed * onp.conj(kernel_fft),
-        s=work_shape,
-        axes=(-2, -1),
-    )
-    image_region = tuple(slice(0, size) for size in image_shape)
-    correlated = full[(slice(None), slice(None), *image_region)]
-    return onp.sum(correlated * weights[None], axis=1)
-
-
-def _varying_psf_convolve_vjp(
-    result, image, weights, kernel_fft, kernel_shape
-):
-    del result, image
-    return lambda upstream: _varying_psf_adjoint(
-        upstream, weights, kernel_fft, kernel_shape
-    )
-
-
-defvjp(_varying_psf_convolve, _varying_psf_convolve_vjp, None, None, None)
-
-
 class ConvolutionRenderer(Renderer):
     def __init__(
         self,
@@ -344,13 +262,7 @@ class ConvolutionRenderer(Renderer):
         return result
 
     def render_channels(self, model, start, stop, *parameters):
-        """Render channels without allocating a full convolved cube.
-
-        This bounded-memory path currently requires aligned spatial frames,
-        which is the common IFU case. Spectral channel selection is applied
-        before convolution, and the corresponding difference kernels are
-        sliced to the same block.
-        """
+        """Render an aligned block of channels without a full output cube."""
         if self.data_frame.shape[1:] != self.model_frame.shape[1:]:
             raise NotImplementedError(
                 "channel chunking requires matching spatial frame shapes"
@@ -367,10 +279,10 @@ class ConvolutionRenderer(Renderer):
                     "channel chunking requires aligned spatial frame bounds"
                 )
 
-        model_ = self.map_channels(model)[start:stop]
+        mapped = self.map_channels(model)[start:stop]
         shift = self.get_parameter("psf_shift", *parameters)
         kernel = self.diff_kernel.image[start:stop]
-        return self.convolve(model_, psf_shift=shift, kernel=kernel)
+        return self.convolve(mapped, psf_shift=shift, kernel=kernel)
 
     def __call__(self, model, *parameters):
         self.transform = self.get_model(*parameters)
@@ -387,130 +299,6 @@ class ConvolutionRenderer(Renderer):
             # adjust spatial shapes
             model_ = match_shape(model_, self.data_frame, self.slices)
             return model_
-
-        return transform
-
-
-class SpatiallyVaryingConvolutionRenderer(Renderer):
-    """Opt-in aligned-frame renderer with a field-dependent IFU response.
-
-    The response is declared on a rectangular grid of spatial anchors. At
-    every source pixel, bilinear weights mix the anchor responses before flux
-    is propagated through the corresponding convolution. Anchor coordinates
-    are local ``(row, column)`` pixels in the shared model/observation frame.
-
-    This renderer deliberately supports only aligned, identically shaped
-    spatial frames. It changes no default Observation matching behavior.
-
-    Parameters
-    ----------
-    data_frame, model_frame: `scarlet.Frame`
-        Observation and latent model frames.
-    field_psfs: array
-        Fixed ``(observation_channel, anchor, y, x)`` PSF kernels.
-    anchors_yx: pair of arrays
-        Strictly increasing row and column coordinates. Kernels use row-major
-        anchor order.
-    """
-
-    def __init__(
-        self,
-        data_frame,
-        model_frame,
-        field_psfs,
-        anchors_yx,
-    ):
-        super().__init__(data_frame, model_frame)
-        if data_frame.shape[1:] != model_frame.shape[1:]:
-            raise ValueError(
-                "spatially varying rendering requires matching spatial shapes"
-            )
-        if data_frame.bbox.origin[1:] != model_frame.bbox.origin[1:]:
-            raise ValueError(
-                "spatially varying rendering requires aligned spatial bounds"
-            )
-        if data_frame.wcs is not model_frame.wcs:
-            raise ValueError(
-                "spatially varying rendering requires the same spatial WCS"
-            )
-        if model_frame.psf is None:
-            raise ValueError("the model frame must declare a PSF")
-
-        weights = spatial_interpolation_weights(
-            anchors_yx, model_frame.shape[1:]
-        )
-        psfs = np.asarray(field_psfs, dtype=model_frame.dtype)
-        if psfs.ndim != 4:
-            raise ValueError(
-                "field_psfs must have shape (channel, anchor, y, x)"
-            )
-        if psfs.shape[:2] != (data_frame.C, weights.shape[0]):
-            raise ValueError(
-                "field_psfs must provide every observation channel and anchor"
-            )
-        if (
-            psfs.shape[2] <= 0
-            or psfs.shape[3] <= 0
-            or np.any(~np.isfinite(psfs))
-            or np.any(psfs < 0)
-        ):
-            raise ValueError("field PSFs must be finite and non-negative")
-        mass = np.sum(psfs, axis=(2, 3))
-        if np.any(mass <= np.finfo(float).tiny):
-            raise ValueError("every field PSF must contain positive flux")
-        psfs = psfs / mass[:, :, None, None]
-
-        model_psf = self.map_model_psf_channels(model_frame.psf.get_model())
-        if model_psf.shape[-2:] != (1, 1) or not np.allclose(model_psf, 1):
-            raise ValueError(
-                "spatially varying rendering requires an intrinsic DeltaPSF "
-                "model frame"
-            )
-        self.weights = np.asarray(weights, dtype=model_frame.dtype)
-        self.field_psf_shape = tuple(psfs.shape)
-        self.kernel_shape = tuple(psfs.shape[-2:])
-        work_shape = tuple(
-            image_size + kernel_size - 1
-            for image_size, kernel_size in zip(
-                model_frame.shape[-2:], self.kernel_shape
-            )
-        )
-        self.kernel_fft = scipy_fft.rfftn(
-            onp.asarray(psfs),
-            s=work_shape,
-            axes=(-2, -1),
-        )
-
-    @property
-    def storage_bytes(self):
-        """Bytes retained for interpolation weights and cached kernel FFTs."""
-        return self.weights.nbytes + self.kernel_fft.nbytes
-
-    def _render_mapped(self, model, start, stop):
-        return _varying_psf_convolve(
-            model,
-            self.weights,
-            self.kernel_fft[start:stop],
-            self.kernel_shape,
-        )
-
-    def render_channels(self, model, start, stop, *parameters):
-        if parameters:
-            raise ValueError("spatially varying field PSFs are fixed")
-        if not isinstance(start, Integral) or not isinstance(stop, Integral):
-            raise TypeError("channel bounds must be integers")
-        if start < 0 or stop > self.data_frame.C or start >= stop:
-            raise ValueError("channel bounds must select observation channels")
-        mapped = self.map_channels(model)[start:stop]
-        return self._render_mapped(mapped, start, stop)
-
-    def get_model(self, *parameters):
-        if parameters:
-            raise ValueError("spatially varying field PSFs are fixed")
-
-        def transform(model):
-            mapped = self.map_channels(model)
-            return self._render_mapped(mapped, 0, self.data_frame.C)
 
         return transform
 
@@ -635,7 +423,7 @@ class ResolutionRenderer(Renderer):
         wcs_lr = data_frame.wcs
 
         # PSF models
-        psf_hr = self.map_model_psf_channels(model_frame.psf.get_model())
+        psf_hr = model_frame.psf.get_model()
         psf_lr = data_frame.psf.get_model().astype(model_frame.dtype)
 
         # Computes spatially matching observation and model psf. The observation psf is also resampled \\

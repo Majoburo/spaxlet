@@ -1,37 +1,12 @@
 import astropy
 import logging
 import numpy as np
-from astropy import units as u
 
 from .bbox import Box
 from .psf import PSF, ImagePSF
 from . import interpolation
 
 logger = logging.getLogger("scarlet.frame")
-
-
-def _validated_wavelengths(wavelengths, channels):
-    if wavelengths is None:
-        return None
-    try:
-        unique_channels = len(set(channels))
-    except TypeError as error:
-        raise TypeError("wavelength channel identifiers must be hashable") from error
-    if unique_channels != len(channels):
-        raise ValueError("wavelength channel identifiers must be unique")
-    if not isinstance(wavelengths, u.Quantity):
-        raise TypeError("wavelengths must be an astropy Quantity with units")
-    try:
-        values = np.asarray(wavelengths.to_value(u.m), dtype=float)
-    except u.UnitConversionError as error:
-        raise ValueError("wavelengths must have physical length units") from error
-    if values.ndim != 1 or values.size != len(channels):
-        raise ValueError("wavelengths must have one value per spectral channel")
-    if not np.all(np.isfinite(values)) or np.any(values <= 0):
-        raise ValueError("wavelengths must be finite and positive")
-    if values.size > 1 and np.any(np.diff(values) <= 0):
-        raise ValueError("wavelengths must be strictly increasing")
-    return values.copy() * u.m
 
 
 class Frame:
@@ -49,23 +24,12 @@ class Frame:
         Names/identifiers of spectral channels
     dtype: `numpy.dtype`
         Dtype to represent the data.
-    wavelengths: `astropy.units.Quantity` or None
-        Optional strictly increasing physical wavelength for every channel.
     """
 
-    def __init__(
-        self,
-        shape,
-        channels,
-        wcs=None,
-        psf=None,
-        dtype=np.float32,
-        wavelengths=None,
-    ):
+    def __init__(self, shape, channels, wcs=None, psf=None, dtype=np.float32):
         self._bbox = Box(shape)
         assert len(channels) == self.C
         self.channels = channels
-        self.wavelengths = _validated_wavelengths(wavelengths, self.channels)
 
         if wcs is not None:
             assert isinstance(wcs, astropy.wcs.WCS)
@@ -225,12 +189,10 @@ class Frame:
         fat_psf_size = None
         small_psf_size = None
         channels = []
-        wavelength_groups = []
         # Create frame channels and find smallest and largest psf
         for c, obs in enumerate(observations):
             # Concatenate all channels
             channels = channels + obs.channels
-            wavelength_groups.append(obs.wavelengths)
             # concatenate all pixel sizes
             h_temp = interpolation.get_pixel_size(interpolation.get_affine(obs.wcs))
             pix_tab.append(h_temp)
@@ -255,17 +217,6 @@ class Frame:
             # Frame defined from obs_id
             obs_ref = observations[obs_id]
 
-        if any(group is not None for group in wavelength_groups):
-            if not all(group is not None for group in wavelength_groups):
-                raise ValueError(
-                    "all observations need wavelengths when any observation has them"
-                )
-            wavelengths = np.concatenate(
-                [group.to_value(u.m) for group in wavelength_groups]
-            ) * u.m
-        else:
-            wavelengths = None
-
         # Reference wcs
         if model_wcs is None:
             model_wcs = obs_ref.wcs
@@ -287,11 +238,7 @@ class Frame:
         # Dummy frame for WCS computations
         model_shape = (len(channels), 0, 0)
         model_frame = Frame(
-            model_shape,
-            channels=channels,
-            psf=model_psf,
-            wcs=model_wcs,
-            wavelengths=wavelengths,
+            model_shape, channels=channels, psf=model_psf, wcs=model_wcs
         )
 
         # Determine overlap of all observations in pixel coordinates of the model frame
@@ -330,11 +277,7 @@ class Frame:
         # recreate the model frame with the correct shape
         frame_shape = (len(channels), *model_box.shape)
         model_frame = Frame(
-            frame_shape,
-            channels=channels,
-            psf=model_psf,
-            wcs=model_wcs,
-            wavelengths=wavelengths,
+            frame_shape, channels=channels, psf=model_psf, wcs=model_wcs
         )
 
         # Match observations to this frame

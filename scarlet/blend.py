@@ -1,4 +1,3 @@
-from collections import namedtuple
 from functools import partial
 
 import numpy.ma as ma
@@ -13,19 +12,6 @@ from .component import CombinedComponent
 from .model import UpdateException
 
 logger = logging.getLogger("scarlet.blend")
-
-
-ParameterOptimizationDiagnostics = namedtuple(
-    "ParameterOptimizationDiagnostics",
-    (
-        "relative_projected_gradient",
-        "spectral_relative_projected_gradient",
-        "morphology_relative_projected_gradient",
-        "projected_gradient_norm",
-        "weighted_data_energy",
-        "parameter_relative_projected_gradients",
-    ),
-)
 
 
 @primitive
@@ -97,7 +83,6 @@ class Blend(CombinedComponent):
         self.loss = []
         self._noise_factor = 0
         self._channel_chunk_size = None
-        self._spectral_volume_strength = 0.0
 
     def fit(
         self,
@@ -105,15 +90,10 @@ class Blend(CombinedComponent):
         e_rel=1e-3,
         min_iter=1,
         noise_factor=0,
-        project_initial=False,
-        normalize_initial_factors=False,
         channel_chunk_size=None,
         optimizer="adaprox",
         projected_step=None,
         projected_max_backtracks=30,
-        minimum_volume_strength=0.0,
-        spectral_max_iter=100,
-        spectral_tolerance=1e-8,
         **alg_kwargs
     ):
         """Fit the model for each source to the data
@@ -128,19 +108,6 @@ class Blend(CombinedComponent):
             Maximum number of iterations if the algorithm doesn't converge
         alg_kwargs: dict
             Keywords for the `proxmin.adaprox` optimizer
-        project_initial: bool
-            Project every free starting parameter through its declared
-            constraint before evaluating the first model. This is useful for
-            caller-supplied factors: an infeasible start can otherwise create
-            a large first proximal jump unrelated to the gradient. The default
-            is ``False`` for backward compatibility.
-        normalize_initial_factors: bool
-            Put every free tabulated-spectrum/image-morphology pair in a
-            common L1 gauge before optimization: the morphology is divided by
-            its sum and the spectrum is multiplied by the same value. The
-            source model is unchanged. The normalized morphology must remain
-            feasible under its declared constraint. The default is ``False``
-            for backward compatibility.
         channel_chunk_size: int or None
             Render and score this many observation channels at a time. This
             lowers peak memory for compatible renderers without changing the
@@ -155,124 +122,15 @@ class Blend(CombinedComponent):
             uses each image parameter's declared step.
         projected_max_backtracks: int
             Maximum halvings in a projected morphology line search.
-        minimum_volume_strength: float
-            Strength of an opt-in normalized spectral log-volume penalty.
-            Unlike a post-solve veto, this is optimized inside the nonlinear
-            spectral subproblem and therefore genuinely steers the factors.
-        spectral_max_iter, spectral_tolerance: int, float
-            Inner spectral optimizer controls when volume regularization is
-            active. They do not affect the exact unregularized solve.
         """
-        if not isinstance(project_initial, (bool, np.bool_)):
-            raise TypeError("project_initial must be boolean")
-        if not isinstance(normalize_initial_factors, (bool, np.bool_)):
-            raise TypeError("normalize_initial_factors must be boolean")
-        if channel_chunk_size is not None:
-            if not isinstance(channel_chunk_size, (int, np.integer)):
-                raise TypeError("channel_chunk_size must be an integer or None")
-            if channel_chunk_size <= 0:
-                raise ValueError("channel_chunk_size must be positive")
-        self.initial_projection_relative_l2 = 0.0
-        if project_initial:
-            parameters = self.parameters + tuple(
-                parameter
-                for observation in self.observations
-                for parameter in observation.parameters
-            )
-            change_squared = 0.0
-            scale_squared = 0.0
-            for parameter in parameters:
-                if parameter.fixed or parameter.constraint is None:
-                    continue
-                original = parameter.copy()
-                projected = np.asarray(parameter.constraint(original.copy(), 0))
-                if projected.shape != parameter.shape:
-                    raise ValueError("an initial projection changed parameter shape")
-                if not np.all(np.isfinite(projected)):
-                    raise ValueError("an initial projection produced non-finite values")
-                parameter[...] = projected
-                change_squared += float(np.sum((projected - original) ** 2))
-                scale_squared += float(np.sum(original**2))
-            self.initial_projection_relative_l2 = np.sqrt(change_squared) / max(
-                np.sqrt(scale_squared), np.finfo(float).tiny
-            )
-        self.initial_normalization_relative_l2 = 0.0
-        if normalize_initial_factors:
-            change_squared = 0.0
-            scale_squared = 0.0
-            for source in self.sources:
-                spectrum_parameters = tuple(
-                    parameter
-                    for parameter in source.parameters
-                    if parameter.name == "spectrum"
-                )
-                morphology_parameters = tuple(
-                    parameter
-                    for parameter in source.parameters
-                    if parameter.name == "image"
-                )
-                if not spectrum_parameters or not morphology_parameters:
-                    continue
-                if len(spectrum_parameters) != 1 or len(morphology_parameters) != 1:
-                    raise ValueError(
-                        "initial factor normalization requires one spectrum "
-                        "and one image parameter per source"
-                    )
-                spectrum = spectrum_parameters[0]
-                morphology = morphology_parameters[0]
-                if spectrum.fixed or morphology.fixed:
-                    continue
-                if np.any(morphology < -1e-12):
-                    raise ValueError(
-                        "initial factor normalization requires a non-negative "
-                        "morphology; use project_initial=True first"
-                    )
-                factor = float(np.sum(morphology))
-                if not np.isfinite(factor) or factor <= np.finfo(float).tiny:
-                    raise ValueError(
-                        "initial factor normalization requires positive "
-                        "morphology flux"
-                    )
-                normalized = np.asarray(morphology / factor)
-                if morphology.constraint is not None:
-                    feasible = np.asarray(
-                        morphology.constraint(normalized.copy(), 0), dtype=float
-                    )
-                    if not np.allclose(
-                        feasible, normalized, rtol=1e-7, atol=1e-12
-                    ):
-                        raise ValueError(
-                            "L1 factor normalization is incompatible with the "
-                            "declared morphology constraint"
-                        )
-                old_spectrum = spectrum.copy()
-                old_morphology = morphology.copy()
-                spectrum[...] = spectrum * factor
-                morphology[...] = normalized
-                change_squared += float(
-                    np.sum((spectrum - old_spectrum) ** 2)
-                    + np.sum((morphology - old_morphology) ** 2)
-                )
-                scale_squared += float(
-                    np.sum(old_spectrum**2) + np.sum(old_morphology**2)
-                )
-            self.initial_normalization_relative_l2 = np.sqrt(
-                change_squared
-            ) / max(np.sqrt(scale_squared), np.finfo(float).tiny)
         it = 0
         self._noise_factor = noise_factor
         self._channel_chunk_size = channel_chunk_size
-        self._spectral_volume_strength = float(minimum_volume_strength)
         if optimizer not in ("adaprox", "variable_projection"):
             raise ValueError(
                 "optimizer must be 'adaprox' or 'variable_projection'"
             )
-        if optimizer == "adaprox":
-            if minimum_volume_strength != 0.0:
-                raise ValueError(
-                    "minimum_volume_strength requires optimizer='variable_projection'"
-                )
-        else:
+        if optimizer == "variable_projection":
             from .optimization import fit_variable_projection
 
             result = fit_variable_projection(
@@ -283,9 +141,6 @@ class Blend(CombinedComponent):
                 callback=alg_kwargs.pop("callback", None),
                 projected_step=projected_step,
                 max_backtracks=projected_max_backtracks,
-                volume_strength=self._spectral_volume_strength,
-                spectral_max_iter=spectral_max_iter,
-                spectral_tolerance=spectral_tolerance,
             )
             if alg_kwargs:
                 raise TypeError(
@@ -480,137 +335,6 @@ class Blend(CombinedComponent):
             n_params += n_obs_params
 
         return total_loss
-
-    def parameter_optimization_diagnostics(self, probe=1e-5):
-        """Return a dimensionless proximal first-order residual.
-
-        Each free parameter is probed with a gauge-covariant step
-        ``probe * ||x||**2 / E``, where ``E`` is the larger of the weighted
-        data energy and current objective magnitude. The resulting projected
-        gradient mapping is normalized as ``||r|| ||x|| / E``. Morphology
-        mappings have their radial component removed because that direction
-        is the exact spectrum--morphology scale gauge; spectral stationarity
-        is reported separately so a physical amplitude error is not hidden.
-
-        This diagnostic evaluates the declared constraints but does not alter
-        parameters or append to the fit history. It is intended as a KKT-style
-        stopping and comparison check, not as an identifiability diagnostic.
-        """
-        probe = float(probe)
-        if not np.isfinite(probe) or probe <= 0:
-            raise ValueError("probe must be finite and positive")
-        if self._noise_factor > 0:
-            raise ValueError(
-                "optimization diagnostics require deterministic noise_factor=0"
-            )
-
-        parameters = self.parameters + tuple(
-            parameter
-            for observation in self.observations
-            for parameter in observation.parameters
-        )
-        free_indices = tuple(
-            index for index, parameter in enumerate(parameters) if not parameter.fixed
-        )
-        weighted_data_energy = float(
-            sum(
-                np.sum(observation.weights * observation.data**2)
-                for observation in self.observations
-            )
-        )
-        if not free_indices:
-            return ParameterOptimizationDiagnostics(
-                0.0, 0.0, 0.0, 0.0, weighted_data_energy, ()
-            )
-
-        gradient_function = grad(self._objective_func, free_indices)
-        gradients = gradient_function(*parameters)
-        if len(free_indices) == 1 and not isinstance(gradients, tuple):
-            gradients = (gradients,)
-        gradients = list(gradients)
-        objective = float(self._objective_func(*parameters))
-        if self._spectral_volume_strength > 0.0:
-            from .optimization import spectral_volume_value_gradient
-
-            spectrum_parameters = [
-                source.spectrum.parameters[0] for source in self.sources
-            ]
-            spectra = np.stack(
-                [np.asarray(parameter, dtype=float) for parameter in spectrum_parameters],
-                axis=1,
-            )
-            volume, volume_gradients = spectral_volume_value_gradient(
-                spectra, self._spectral_volume_strength
-            )
-            objective += volume
-            free_position = {
-                parameter_index: gradient_index
-                for gradient_index, parameter_index in enumerate(free_indices)
-            }
-            for source_index, spectrum_parameter in enumerate(spectrum_parameters):
-                parameter_index = next(
-                    index
-                    for index, parameter in enumerate(parameters)
-                    if parameter is spectrum_parameter
-                )
-                if parameter_index in free_position:
-                    gradient_index = free_position[parameter_index]
-                    gradients[gradient_index] = (
-                        np.asarray(gradients[gradient_index], dtype=float)
-                        + volume_gradients[:, source_index]
-                    )
-        scale = max(
-            abs(objective), weighted_data_energy, np.finfo(float).tiny
-        )
-
-        total_energy = 0.0
-        spectral_energy = 0.0
-        morphology_energy = 0.0
-        absolute_mapping_energy = 0.0
-        parameter_residuals = []
-        for index, gradient_value in zip(free_indices, gradients):
-            parameter = parameters[index]
-            gradient_value = np.asarray(gradient_value, dtype=float)
-            if parameter.prior is not None:
-                gradient_value = gradient_value + parameter.prior(
-                    parameter.view(np.ndarray)
-                )
-            value = np.asarray(parameter.view(np.ndarray), dtype=float)
-            value_norm = float(np.linalg.norm(value))
-            if value_norm <= np.finfo(float).tiny:
-                parameter_residuals.append((parameter.name, 0.0))
-                continue
-            step = probe * value_norm**2 / scale
-            trial = value - step * gradient_value
-            if parameter.constraint is not None:
-                projected = np.asarray(
-                    parameter.constraint(trial.copy(), step), dtype=float
-                )
-            else:
-                projected = trial
-            mapping = (value - projected) / step
-            if parameter.name in ("image", "coeffs"):
-                radial = float(np.vdot(value, mapping).real) / value_norm**2
-                mapping = mapping - radial * value
-            mapping_norm = float(np.linalg.norm(mapping))
-            relative = mapping_norm * value_norm / scale
-            energy = relative**2
-            total_energy += energy
-            absolute_mapping_energy += mapping_norm**2
-            if parameter.name == "spectrum":
-                spectral_energy += energy
-            elif parameter.name in ("image", "coeffs"):
-                morphology_energy += energy
-            parameter_residuals.append((parameter.name, relative))
-
-        return ParameterOptimizationDiagnostics(
-            float(np.sqrt(total_energy)),
-            float(np.sqrt(spectral_energy)),
-            float(np.sqrt(morphology_energy)),
-            float(np.sqrt(absolute_mapping_energy)),
-            weighted_data_energy,
-            tuple(parameter_residuals),
-        )
 
     def _callback(self, *parameters, it=None, e_rel=1e-3, callback=None, min_iter=1):
 

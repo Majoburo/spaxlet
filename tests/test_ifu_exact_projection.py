@@ -89,11 +89,11 @@ class ExactIntersectionProjectionTest(unittest.TestCase):
     def test_exact_chain_rejects_heuristic_constraints(self):
         with self.assertRaisesRegex(ValueError, "MonotonicityConstraint"):
             scarlet.DykstraConstraintChain(
-                scarlet.MonotonicityConstraint(center=(2, 2))
+                scarlet.MonotonicityConstraint()
             )
         with self.assertRaisesRegex(ValueError, "SymmetryConstraint"):
             scarlet.DykstraConstraintChain(
-                scarlet.SymmetryConstraint(center=(2, 2), strength=0.5)
+                scarlet.SymmetryConstraint(strength=0.5)
             )
 
     def test_nonconvergence_is_not_silent(self):

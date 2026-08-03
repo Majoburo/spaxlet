@@ -1,10 +1,9 @@
 from functools import partial
-from autograd import grad
 
 import numpy as np
 import scarlet
 import scarlet.fft as fft
-from numpy.testing import assert_allclose, assert_array_equal, assert_almost_equal
+from numpy.testing import assert_array_equal, assert_almost_equal
 
 
 class TestCentering(object):
@@ -123,32 +122,3 @@ class TestFourier(object):
 
         for img in image:
             assert_almost_equal(img, psf1.image[0])
-
-    def test_single_precision_fft_preserves_dtype_and_gradient(self):
-        rng = np.random.RandomState(5)
-        image = rng.normal(size=(2, 12, 14)).astype(np.float32)
-        kernel = rng.normal(size=(2, 5, 5)).astype(np.float32)
-        convolved = fft.convolve(
-            image, kernel, axes=(1, 2), return_Fourier=False
-        )
-        assert convolved.dtype == np.float32
-
-        def objective(value):
-            result = fft.convolve(
-                value.reshape(image.shape),
-                kernel,
-                axes=(1, 2),
-                return_Fourier=False,
-            )
-            return np.sum(result**2)
-
-        analytic = grad(objective)(image.reshape(-1)).reshape(image.shape)
-        direction = rng.normal(size=image.shape).astype(np.float32)
-        direction /= np.linalg.norm(direction)
-        epsilon = 2e-3
-        finite = (
-            objective((image + epsilon * direction).reshape(-1))
-            - objective((image - epsilon * direction).reshape(-1))
-        ) / (2 * epsilon)
-        predicted = np.sum(analytic * direction)
-        assert_allclose(predicted, finite, rtol=2e-3, atol=2e-2)

@@ -140,17 +140,11 @@ class ImageMorphology(Morphology):
         self.shrink_box(image)
         if bbox != self.bbox:
             slice, _ = overlapped_slices(bbox, self.bbox)
-            coordinate_offset = tuple(
-                old - new for old, new in zip(bbox.origin, self.bbox.origin)
-            )
-            constraint = image.constraint
-            if constraint is not None:
-                constraint = constraint.shifted(coordinate_offset)
             image = Parameter(
                 image[slice],
                 name=image.name,
                 prior=image.prior,
-                constraint=constraint,
+                constraint=image.constraint,
                 step=image.step / 2,
                 fixed=image.fixed,
                 m=image.m[slice] if image.m is not None else None,
@@ -185,16 +179,13 @@ class ImageMorphology(Morphology):
                 size = max(bbox.shape)
                 newsize = init.get_minimal_boxsize(size + 1)
                 pad_width = (newsize - size) // 2
-                constraint = image.constraint
-                if constraint is not None:
-                    constraint = constraint.shifted((pad_width, pad_width))
 
                 # Create new parameter for extended image
                 image = Parameter(
                     np.pad(image, pad_width, mode="linear_ramp"),
                     name=image.name,
                     prior=image.prior,
-                    constraint=constraint,
+                    constraint=image.constraint,
                     step=image.step / 2,
                     fixed=image.fixed,
                     m=np.pad(image.m, pad_width, mode="constant")

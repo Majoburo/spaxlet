@@ -1,5 +1,7 @@
 """Opt-in optimizers for constrained factorized spectral scenes."""
 
+from collections import namedtuple
+
 import numpy as np
 from autograd import grad
 
@@ -7,6 +9,151 @@ from .component import FactorizedComponent
 from .constraint import PositivityConstraint
 from .morphology import ImageMorphology
 from .spectrum import TabulatedSpectrum
+
+
+OptimizationDiagnostics = namedtuple(
+    "OptimizationDiagnostics",
+    (
+        "relative_projected_gradient",
+        "spectral_relative_projected_gradient",
+        "morphology_relative_projected_gradient",
+        "projected_gradient_norm",
+        "weighted_data_energy",
+        "parameter_relative_projected_gradients",
+    ),
+)
+
+
+def _prepare_initial_factors(blend):
+    """Project free factors and put them in a unit-sum morphology gauge."""
+    change_squared = scale_squared = 0.0
+    for parameter in blend.parameters:
+        if parameter.fixed or parameter.constraint is None:
+            continue
+        original = parameter.copy()
+        projected = np.asarray(parameter.constraint(original.copy(), 0))
+        if projected.shape != parameter.shape or not np.all(np.isfinite(projected)):
+            raise ValueError("initial projection produced an invalid parameter")
+        parameter[...] = projected
+        change_squared += float(np.sum((projected - original) ** 2))
+        scale_squared += float(np.sum(original**2))
+    blend.initial_projection_relative_l2 = np.sqrt(change_squared) / max(
+        np.sqrt(scale_squared), np.finfo(float).tiny
+    )
+
+    change_squared = scale_squared = 0.0
+    for source in blend.sources:
+        spectrum = source.spectrum.parameters[0]
+        morphology = source.morphology.parameters[0]
+        if spectrum.fixed or morphology.fixed:
+            continue
+        factor = float(np.sum(morphology))
+        if not np.isfinite(factor) or factor <= np.finfo(float).tiny:
+            raise ValueError("initial morphology must have positive finite flux")
+        old_spectrum = spectrum.copy()
+        old_morphology = morphology.copy()
+        normalized = np.asarray(morphology / factor)
+        if morphology.constraint is not None:
+            feasible = np.asarray(
+                morphology.constraint(normalized.copy(), 0), dtype=float
+            )
+            if not np.allclose(feasible, normalized, rtol=1e-7, atol=1e-12):
+                raise ValueError(
+                    "unit-sum morphology gauge violates its constraint"
+                )
+        spectrum[...] = spectrum * factor
+        morphology[...] = normalized
+        change_squared += float(
+            np.sum((spectrum - old_spectrum) ** 2)
+            + np.sum((morphology - old_morphology) ** 2)
+        )
+        scale_squared += float(
+            np.sum(old_spectrum**2) + np.sum(old_morphology**2)
+        )
+    blend.initial_normalization_relative_l2 = np.sqrt(change_squared) / max(
+        np.sqrt(scale_squared), np.finfo(float).tiny
+    )
+
+
+def parameter_optimization_diagnostics(blend, probe=1e-5):
+    """Return a dimensionless proximal first-order residual for a blend."""
+    probe = float(probe)
+    if not np.isfinite(probe) or probe <= 0:
+        raise ValueError("probe must be finite and positive")
+    if blend._noise_factor > 0:
+        raise ValueError("diagnostics require deterministic noise_factor=0")
+
+    parameters = blend.parameters + tuple(
+        parameter
+        for observation in blend.observations
+        for parameter in observation.parameters
+    )
+    free_indices = tuple(
+        index for index, parameter in enumerate(parameters) if not parameter.fixed
+    )
+    weighted_data_energy = float(
+        sum(
+            np.sum(observation.weights * observation.data**2)
+            for observation in blend.observations
+        )
+    )
+    if not free_indices:
+        return OptimizationDiagnostics(
+            0.0, 0.0, 0.0, 0.0, weighted_data_energy, ()
+        )
+
+    gradient_function = grad(blend._objective_func, free_indices)
+    gradients = gradient_function(*parameters)
+    if len(free_indices) == 1 and not isinstance(gradients, tuple):
+        gradients = (gradients,)
+    scale = max(
+        abs(float(blend._objective_func(*parameters))),
+        weighted_data_energy,
+        np.finfo(float).tiny,
+    )
+    total_energy = spectral_energy = morphology_energy = 0.0
+    absolute_mapping_energy = 0.0
+    parameter_residuals = []
+    for index, gradient_value in zip(free_indices, gradients):
+        parameter = parameters[index]
+        gradient_value = np.asarray(gradient_value, dtype=float)
+        if parameter.prior is not None:
+            gradient_value += parameter.prior(parameter.view(np.ndarray))
+        value = np.asarray(parameter.view(np.ndarray), dtype=float)
+        value_norm = float(np.linalg.norm(value))
+        reference_norm = max(value_norm, 1.0)
+        step = probe * reference_norm**2 / scale
+        trial = value - step * gradient_value
+        projected = (
+            np.asarray(parameter.constraint(trial.copy(), step), dtype=float)
+            if parameter.constraint is not None
+            else trial
+        )
+        mapping = (value - projected) / step
+        if (
+            parameter.name in ("image", "coeffs")
+            and value_norm > np.finfo(float).tiny
+        ):
+            radial = float(np.vdot(value, mapping).real) / value_norm**2
+            mapping -= radial * value
+        mapping_norm = float(np.linalg.norm(mapping))
+        relative = mapping_norm * reference_norm / scale
+        total_energy += relative**2
+        absolute_mapping_energy += mapping_norm**2
+        if parameter.name == "spectrum":
+            spectral_energy += relative**2
+        elif parameter.name in ("image", "coeffs"):
+            morphology_energy += relative**2
+        parameter_residuals.append((parameter.name, relative))
+
+    return OptimizationDiagnostics(
+        float(np.sqrt(total_energy)),
+        float(np.sqrt(spectral_energy)),
+        float(np.sqrt(morphology_energy)),
+        float(np.sqrt(absolute_mapping_energy)),
+        weighted_data_energy,
+        tuple(parameter_residuals),
+    )
 
 
 def _solve_nonnegative_gram(gram, matched):
@@ -60,41 +207,6 @@ def _solve_nonnegative_gram(gram, matched):
             value[at_boundary] = 0.0
         dual = target - equilibrated @ value
     return np.maximum(value, 0.0) / scale
-
-
-def spectral_volume_value_gradient(spectra, strength):
-    """Return normalized log-volume and its gradient for spectral columns."""
-    spectra = np.asarray(spectra, dtype=float)
-    strength = float(strength)
-    gradient = np.zeros_like(spectra)
-    if strength == 0.0 or spectra.shape[1] < 2:
-        return 0.0, gradient
-    norms = np.linalg.norm(spectra, axis=0)
-    if np.any(norms <= np.finfo(float).tiny):
-        return 0.0, gradient
-    normalized = spectra / norms
-    gram = normalized.T @ normalized + 1e-12 * np.eye(spectra.shape[1])
-    if gram.shape == (2, 2):
-        determinant = float(gram[0, 0] * gram[1, 1] - gram[0, 1] ** 2)
-        if determinant <= 0.0:
-            return 0.0, gradient
-        logdet = np.log(determinant)
-        inverse = np.asarray(
-            [[gram[1, 1], -gram[0, 1]], [-gram[1, 0], gram[0, 0]]]
-        ) / determinant
-    else:
-        sign, logdet = np.linalg.slogdet(gram)
-        if sign <= 0:
-            return 0.0, gradient
-        inverse = np.linalg.inv(gram)
-    normalized_gradient = 2.0 * normalized @ inverse
-    for source in range(spectra.shape[1]):
-        direction = normalized[:, source]
-        value = normalized_gradient[:, source]
-        gradient[:, source] = (
-            value - direction * float(np.dot(direction, value))
-        ) / norms[source]
-    return strength * float(logdet), strength * gradient
 
 
 def _channel_indices(observation, model_channels):
@@ -219,61 +331,16 @@ def _spectral_statistics(blend, morphologies, channel_indices):
     return grams, matched, constant
 
 
-def _spectral_objective(spectra, grams, matched, constant, volume_strength):
-    quadratic = constant + 0.5 * float(
+def _spectral_objective(spectra, grams, matched, constant):
+    return constant + 0.5 * float(
         np.einsum("ck,ckl,cl->", spectra, grams, spectra, optimize=True)
     ) - float(np.sum(matched * spectra))
-    volume, _ = spectral_volume_value_gradient(spectra, volume_strength)
-    return quadratic + volume
-
-
-def _solve_regularized_spectra(
-    initial,
-    grams,
-    matched,
-    constant,
-    strength,
-    max_iter,
-    tolerance,
-):
-    spectra = np.asarray(initial, dtype=float).copy()
-    largest = max(
-        float(np.max(np.linalg.eigvalsh(grams))), np.finfo(float).tiny
-    )
-    step = 1.0 / largest
-    objective = _spectral_objective(
-        spectra, grams, matched, constant, strength
-    )
-    for _ in range(max_iter):
-        _, volume_gradient = spectral_volume_value_gradient(spectra, strength)
-        gradient = np.einsum("ckl,cl->ck", grams, spectra) - matched
-        gradient += volume_gradient
-        accepted = False
-        for backtrack in range(31):
-            trial_step = step * 0.5**backtrack
-            trial = np.maximum(spectra - trial_step * gradient, 0.0)
-            trial_objective = _spectral_objective(
-                trial, grams, matched, constant, strength
-            )
-            if trial_objective <= objective:
-                change = float(np.linalg.norm(trial - spectra))
-                scale = max(float(np.linalg.norm(spectra)), 1.0)
-                spectra, objective = trial, trial_objective
-                step = 1.5 * trial_step
-                accepted = True
-                break
-        if not accepted or change <= tolerance * scale:
-            break
-    return spectra, objective
 
 
 def _profile_spectra(
     blend,
     morphologies,
     channel_indices,
-    volume_strength,
-    spectral_max_iter,
-    spectral_tolerance,
 ):
     grams, matched, constant = _spectral_statistics(
         blend, morphologies, channel_indices
@@ -281,18 +348,7 @@ def _profile_spectra(
     spectra = np.asarray(
         [_solve_nonnegative_gram(gram, target) for gram, target in zip(grams, matched)]
     )
-    if volume_strength > 0.0:
-        spectra, objective = _solve_regularized_spectra(
-            spectra,
-            grams,
-            matched,
-            constant,
-            volume_strength,
-            spectral_max_iter,
-            spectral_tolerance,
-        )
-    else:
-        objective = _spectral_objective(spectra, grams, matched, constant, 0.0)
+    objective = _spectral_objective(spectra, grams, matched, constant)
     return spectra, float(objective)
 
 
@@ -305,20 +361,14 @@ def fit_variable_projection(
     callback,
     projected_step,
     max_backtracks,
-    volume_strength,
-    spectral_max_iter,
-    spectral_tolerance,
 ):
     """Fit factorized sources with exact spectra and projected morphologies."""
     image_parameters, image_indices, channel_indices = _validate_factorized_problem(
         blend
     )
-    if max_backtracks < 0 or spectral_max_iter < 1:
-        raise ValueError("optimizer iteration counts must be non-negative")
-    if volume_strength < 0.0 or not np.isfinite(volume_strength):
-        raise ValueError("volume_strength must be finite and non-negative")
-    if spectral_tolerance <= 0.0 or not np.isfinite(spectral_tolerance):
-        raise ValueError("spectral_tolerance must be finite and positive")
+    _prepare_initial_factors(blend)
+    if max_backtracks < 0:
+        raise ValueError("max_backtracks must be non-negative")
 
     morphologies = [
         np.asarray(source.morphology.parameters[0], dtype=float).copy()
@@ -328,9 +378,6 @@ def fit_variable_projection(
         blend,
         morphologies,
         channel_indices,
-        volume_strength,
-        spectral_max_iter,
-        spectral_tolerance,
     )
     for source, values in zip(blend.sources, spectra.T):
         source.spectrum.parameters[0][...] = values
@@ -391,9 +438,6 @@ def fit_variable_projection(
                         blend,
                         candidate,
                         channel_indices,
-                        volume_strength,
-                        spectral_max_iter,
-                        spectral_tolerance,
                     )
                     tolerance = 10.0 * np.finfo(float).eps * max(
                         abs(objective), 1.0

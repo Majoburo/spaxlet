@@ -73,23 +73,6 @@ class TestFactorizedComponent:
         assert_almost_equal(model[~mask], 0)
         assert_almost_equal(model[test_loc], 1)
 
-    def test_blend_can_project_caller_supplied_initial_factors(self):
-        shape = (2, 7, 7)
-        channels = np.arange(shape[0])
-        frame = scarlet.Frame(shape, channels=channels)
-        spectrum = scarlet.TabulatedSpectrum(frame, np.ones(shape[0]))
-        image = np.ones(shape[1:])
-        image[0, 0] = -3.0
-        morphology = scarlet.ImageMorphology(frame, image, resizing=False)
-        source = scarlet.FactorizedComponent(frame, spectrum, morphology)
-        observation = scarlet.Observation(
-            np.zeros(shape), channels=channels, weights=np.ones(shape)
-        ).match(frame)
-        blend = scarlet.Blend([source], observation)
-        blend.fit(1, project_initial=True)
-        assert blend.initial_projection_relative_l2 > 0
-        assert np.all(source.morphology.get_model() >= 0)
-
 
 class TestFunctionComponent:
     def test_model(self):

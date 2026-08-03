@@ -7,38 +7,6 @@ from . import operator
 from .cache import Cache
 
 
-def _constraint_center(shape, center):
-    if center is None:
-        return (shape[0] // 2, shape[1] // 2)
-    if len(center) != 2 or any(
-        not isinstance(value, (int, np.integer)) for value in center
-    ):
-        raise ValueError("center must contain two integer pixel coordinates")
-    center = tuple(int(value) for value in center)
-    if any(value < 0 or value >= size for value, size in zip(center, shape)):
-        raise ValueError("center must lie inside the morphology")
-    return center
-
-
-def _shifted_center(center, offset, *, integer):
-    if center is None:
-        return None
-    if len(offset) != len(center) or not np.all(np.isfinite(offset)):
-        raise ValueError("a coordinate shift must match the center and be finite")
-    if integer:
-        resolved = tuple(int(delta) for delta in offset)
-        if any(float(delta) != value for delta, value in zip(offset, resolved)):
-            raise ValueError("an integer pixel center requires an integer shift")
-        return tuple(
-            int(coordinate) + delta
-            for coordinate, delta in zip(center, resolved)
-        )
-    return tuple(
-        float(coordinate) + float(delta)
-        for coordinate, delta in zip(center, offset)
-    )
-
-
 class Constraint:
     """Constraint base class
 
@@ -88,16 +56,6 @@ class Constraint:
             return self.f(X, step)
         return X
 
-    def shifted(self, offset):
-        """Return the equivalent constraint after a coordinate-grid shift.
-
-        Constraints without spatial coordinates are invariant and return
-        themselves. Coordinate-bearing subclasses rebuild their cached
-        geometry around the shifted local center.
-        """
-
-        return self
-
 
 class ConstraintChain:
     """An ordered list of `Constraint`s.
@@ -123,34 +81,9 @@ class ConstraintChain:
                 X = c(X, step)
         return X
 
-    def shifted(self, offset):
-        constraints = tuple(
-            constraint.shifted(offset)
-            if hasattr(constraint, "shifted")
-            else constraint
-            for constraint in self.constraints
-        )
-        return ConstraintChain(*constraints, repeat=self.repeat)
-
 
 class DykstraConstraintChain(ConstraintChain):
-    """Project onto the intersection of exact convex constraint sets.
-
-    Unlike :class:`ConstraintChain`, Dykstra's correction terms converge to the
-    closest point in the intersection, not merely to a feasible point. Every
-    member must explicitly declare that it is an exact Euclidean projection;
-    heuristic transforms such as :class:`MonotonicityConstraint` are rejected.
-
-    Parameters
-    ----------
-    constraints: list of `Constraint`
-        Exact Euclidean projections onto closed convex sets.
-    max_iter: int
-        Maximum number of complete Dykstra sweeps.
-    rtol, atol: float
-        Relative and absolute convergence tolerances for both iterate change
-        and residual constraint violation.
-    """
+    """Exact projection onto an intersection of convex constraint sets."""
 
     is_euclidean_projection = True
 
@@ -169,10 +102,8 @@ class DykstraConstraintChain(ConstraintChain):
             )
         if not isinstance(max_iter, (int, np.integer)) or max_iter < 1:
             raise ValueError("max_iter must be a positive integer")
-        if not np.isfinite(rtol) or rtol < 0:
-            raise ValueError("rtol must be finite and non-negative")
-        if not np.isfinite(atol) or atol < 0:
-            raise ValueError("atol must be finite and non-negative")
+        if not np.isfinite(rtol) or rtol < 0 or not np.isfinite(atol) or atol < 0:
+            raise ValueError("projection tolerances must be finite and non-negative")
         super().__init__(*constraints, repeat=1)
         self.max_iter = int(max_iter)
         self.rtol = float(rtol)
@@ -182,9 +113,9 @@ class DykstraConstraintChain(ConstraintChain):
         original = np.asarray(X)
         result = original.copy()
         corrections = [np.zeros_like(result) for _ in self.constraints]
-        scale = max(float(np.linalg.norm(original)), 1.0)
-        threshold = self.atol + self.rtol * scale
-
+        threshold = self.atol + self.rtol * max(
+            float(np.linalg.norm(original)), 1.0
+        )
         for _ in range(self.max_iter):
             previous = result.copy()
             for index, constraint in enumerate(self.constraints):
@@ -194,9 +125,7 @@ class DykstraConstraintChain(ConstraintChain):
                     raise ValueError("constraints in a chain must preserve shape")
                 corrections[index] = shifted - projected
                 result = projected
-
-            change = float(np.linalg.norm(result - previous))
-            if change <= threshold:
+            if float(np.linalg.norm(result - previous)) <= threshold:
                 violations = [
                     float(
                         np.linalg.norm(
@@ -207,20 +136,10 @@ class DykstraConstraintChain(ConstraintChain):
                 ]
                 if max(violations, default=0.0) <= threshold:
                     return result
-
         raise RuntimeError(
-            "Dykstra projection did not converge in {} sweeps".format(self.max_iter)
-        )
-
-    def shifted(self, offset):
-        constraints = tuple(
-            constraint.shifted(offset) for constraint in self.constraints
-        )
-        return DykstraConstraintChain(
-            *constraints,
-            max_iter=self.max_iter,
-            rtol=self.rtol,
-            atol=self.atol
+            "Dykstra projection did not converge in {} sweeps".format(
+                self.max_iter
+            )
         )
 
 
@@ -339,18 +258,16 @@ class MonotonicityConstraint(Constraint):
         min_gradient=0.1,
         use_mask=False,
         fit_center_radius=0,
-        center=None,
     ):
         self.neighbor_weight = neighbor_weight
         self.min_gradient = min_gradient
         self.use_mask = use_mask
         self.fit_center = fit_center_radius > 0
         self.fit_center_radius = fit_center_radius
-        self.center = center
 
     def __call__(self, morph, step):
         shape = morph.shape
-        center = _constraint_center(shape, self.center)
+        center = (shape[0] // 2, shape[1] // 2)
         if self.fit_center:
             center = operator.get_center(morph, center, radius=self.fit_center_radius)
 
@@ -381,16 +298,6 @@ class MonotonicityConstraint(Constraint):
 
         return result
 
-    def shifted(self, offset):
-        center = _shifted_center(self.center, offset, integer=True)
-        return MonotonicityConstraint(
-            neighbor_weight=self.neighbor_weight,
-            min_gradient=self.min_gradient,
-            use_mask=self.use_mask,
-            fit_center_radius=self.fit_center_radius,
-            center=center,
-        )
-
 
 class MonotonicMaskConstraint(Constraint):
     """Make morphology monotonic by branching from the center
@@ -416,15 +323,6 @@ class MonotonicMaskConstraint(Constraint):
             morph = np.array([self.prox(morph_, step)[1] for morph_ in morph])
         return morph
 
-    def shifted(self, offset):
-        center = _shifted_center(self.center, offset, integer=True)
-        return MonotonicMaskConstraint(
-            center,
-            center_radius=self.center_radius,
-            variance=self.variance,
-            max_iter=self.max_iter,
-        )
-
 
 class SymmetryConstraint(Constraint):
     """Make the source symmetric about its center
@@ -433,70 +331,29 @@ class SymmetryConstraint(Constraint):
     for a description of the parameters.
     """
 
-    def __init__(self, strength=1, center=None):
+    def __init__(self, strength=1):
         self.strength = strength
-        self.center = center
-
-    @property
-    def is_euclidean_projection(self):
-        # An explicit integer center selects an odd finite-support patch whose
-        # reflected pairs are averaged exactly. The historical implicit-center
-        # operator pads even axes and is therefore not always idempotent.
-        return self.strength == 1 and self.center is not None
 
     def __call__(self, morph, step):
-        if self.center is not None:
-            center = _constraint_center(morph.shape, self.center)
-            return operator.prox_uncentered_symmetry(
-                morph,
-                step,
-                center=center,
-                algorithm="soft",
-                strength=self.strength,
-            )
         return operator.prox_soft_symmetry(morph, step, strength=self.strength)
-
-    def shifted(self, offset):
-        center = _shifted_center(self.center, offset, integer=True)
-        return SymmetryConstraint(strength=self.strength, center=center)
 
 
 class CenterOnConstraint(Constraint):
     """Sets the center pixel to a tiny non-zero value
     """
 
-    is_euclidean_projection = True
-
-    def __init__(self, tiny=1e-6, center=None):
+    def __init__(self, tiny=1e-6):
         self.tiny = tiny
-        self.center = center
 
     def __call__(self, morph, step):
         shape = morph.shape
-        center = _constraint_center(shape, self.center)
+        center = (shape[0] // 2, shape[1] // 2)
         morph[center] = max(morph[center], self.tiny)
         return morph
 
-    def shifted(self, offset):
-        center = _shifted_center(self.center, offset, integer=True)
-        return CenterOnConstraint(tiny=self.tiny, center=center)
-
 
 class CentroidConstraint(Constraint):
-    """Project a 2-D morphology onto a fixed flux-weighted centroid.
-
-    For non-zero morphology ``m``, fixing its centroid to ``c`` is equivalent
-    to the two linear equations ``sum(m * (row-c_row)) = 0`` and
-    ``sum(m * (column-c_column)) = 0``. This class is the exact Euclidean
-    projector onto that linear subspace. Combine it with
-    :class:`PositivityConstraint` through :class:`DykstraConstraintChain` to
-    obtain the closest non-negative morphology with the declared centroid.
-
-    Parameters
-    ----------
-    center: tuple of float
-        Target ``(row, column)`` centroid in morphology pixel coordinates.
-    """
+    """Exact projection onto a fixed two-dimensional flux centroid."""
 
     is_euclidean_projection = True
 
@@ -515,23 +372,17 @@ class CentroidConstraint(Constraint):
             for coordinate, size in zip(self.center, value.shape)
         ):
             raise ValueError("centroid must lie inside the morphology")
-
         if value.shape not in self._projection_cache:
             rows, columns = np.indices(value.shape, dtype=float)
             design = np.stack(
                 (rows - self.center[0], columns - self.center[1]), axis=0
             ).reshape(2, -1)
-            gram_inverse = np.linalg.pinv(design @ design.T)
-            self._projection_cache[value.shape] = (design, gram_inverse)
-        design, gram_inverse = self._projection_cache[value.shape]
+            inverse = np.linalg.pinv(design @ design.T)
+            self._projection_cache[value.shape] = (design, inverse)
+        design, inverse = self._projection_cache[value.shape]
         flat = value.reshape(-1)
-        correction = design.T @ gram_inverse @ (design @ flat)
+        correction = design.T @ inverse @ (design @ flat)
         return (flat - correction).reshape(value.shape)
-
-    def shifted(self, offset):
-        return CentroidConstraint(
-            _shifted_center(self.center, offset, integer=False)
-        )
 
 
 class LeakyConstraint(Constraint):

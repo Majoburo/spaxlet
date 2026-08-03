@@ -1,6 +1,4 @@
 import autograd.numpy as np
-import numpy as onp
-from astropy import units as u
 
 from . import interpolation
 from .bbox import Box, overlapped_slices
@@ -22,16 +20,7 @@ class Observation(Frame):
         to zero.
     """
 
-    def __init__(
-        self,
-        data,
-        channels,
-        psf=None,
-        weights=None,
-        wcs=None,
-        padding=10,
-        wavelengths=None,
-    ):
+    def __init__(self, data, channels, psf=None, weights=None, wcs=None, padding=10):
         """Create an Observation
 
         Parameters
@@ -49,20 +38,13 @@ class Observation(Frame):
             World Coordinate System associated with the data.
         channels: list of hashable elements
             Names/identifiers of spectral channels
-        wavelengths: `astropy.units.Quantity` or None
-            Optional strictly increasing physical wavelength for every channel.
         padding: int
             Number of pixels to pad each side with, in addition to
             half the width of the PSF, for FFTs. This is needed to
             prevent artifacts from the FFT.
         """
         super().__init__(
-            data.shape,
-            wcs=wcs,
-            psf=psf,
-            channels=channels,
-            dtype=data.dtype,
-            wavelengths=wavelengths,
+            data.shape, wcs=wcs, psf=psf, channels=channels, dtype=data.dtype
         )
 
         self.data = data
@@ -73,108 +55,6 @@ class Observation(Frame):
         assert (
             self.weights.shape == self.data.shape
         ), "Weights needs to have same shape as data"
-
-    @classmethod
-    def from_ifu_arrays(
-        cls,
-        data,
-        wavelengths,
-        variance,
-        *,
-        dq=None,
-        dq_bad_bits=None,
-        channels=None,
-        psf=None,
-        wcs=None,
-        dtype=None,
-    ):
-        """Build a mask-safe IFU observation from measured cube arrays.
-
-        Non-finite data, non-finite or non-positive variance, and selected DQ
-        voxels receive zero inverse variance. Their stored data values are set
-        to zero as well, preventing ``0 * NaN`` from contaminating the
-        likelihood. Inputs are never modified.
-
-        Parameters
-        ----------
-        data, variance: array
-            Matching ``(channel, y, x)`` science and variance cubes.
-        wavelengths: `astropy.units.Quantity`
-            Strictly increasing physical wavelengths, one per channel.
-        dq: integer array or None
-            Optional data-quality cube matching ``data``.
-        dq_bad_bits: non-negative int or None
-            Bits that invalidate a voxel. ``None`` treats any non-zero DQ value
-            as bad; zero ignores all DQ bits.
-        channels: sequence or None
-            Unique channel identifiers. Defaults to integer channel indices.
-        dtype: numpy dtype or None
-            Floating fit dtype. Defaults to the joint data/variance dtype with
-            at least float32 precision.
-        """
-
-        science = np.asarray(data)
-        measured_variance = np.asarray(variance)
-        if science.ndim != 3:
-            raise ValueError("IFU data must have shape (channel, y, x)")
-        if measured_variance.shape != science.shape:
-            raise ValueError("IFU variance must match the data shape")
-        if dtype is None:
-            resolved_dtype = onp.result_type(
-                science.dtype, measured_variance.dtype, np.float32
-            )
-        else:
-            resolved_dtype = onp.dtype(dtype)
-        if not onp.issubdtype(resolved_dtype, onp.floating):
-            raise TypeError("IFU fit dtype must be floating point")
-
-        nonfinite_data = ~np.isfinite(science)
-        invalid_variance = (
-            ~np.isfinite(measured_variance) | (measured_variance <= 0)
-        )
-        dq_invalid = np.zeros(science.shape, dtype=bool)
-        if dq is not None:
-            quality = np.asarray(dq)
-            if quality.shape != science.shape:
-                raise ValueError("IFU DQ must match the data shape")
-            if not onp.issubdtype(quality.dtype, onp.integer):
-                raise TypeError("IFU DQ values must use an integer dtype")
-            if dq_bad_bits is None:
-                dq_invalid = quality != 0
-            else:
-                if not isinstance(dq_bad_bits, (int, onp.integer)):
-                    raise TypeError("dq_bad_bits must be an integer or None")
-                if dq_bad_bits < 0:
-                    raise ValueError("dq_bad_bits must be non-negative")
-                dq_invalid = (quality & int(dq_bad_bits)) != 0
-        elif dq_bad_bits is not None:
-            raise ValueError("dq_bad_bits requires a DQ array")
-
-        valid = ~(nonfinite_data | invalid_variance | dq_invalid)
-        clean_data = np.zeros(science.shape, dtype=resolved_dtype)
-        clean_data[valid] = science[valid]
-        weights = np.zeros(science.shape, dtype=resolved_dtype)
-        weights[valid] = 1.0 / measured_variance[valid]
-        if channels is None:
-            channels = tuple(range(science.shape[0]))
-
-        observation = cls(
-            clean_data,
-            channels=channels,
-            psf=psf,
-            weights=weights,
-            wcs=wcs,
-            wavelengths=wavelengths,
-        )
-        observation.ifu_valid_mask = np.asarray(valid, dtype=bool)
-        observation.ifu_mask_summary = {
-            "voxels": int(valid.size),
-            "valid": int(np.count_nonzero(valid)),
-            "nonfinite_data": int(np.count_nonzero(nonfinite_data)),
-            "invalid_variance": int(np.count_nonzero(invalid_variance)),
-            "dq_invalid": int(np.count_nonzero(dq_invalid)),
-        }
-        return observation
 
     def match(self, model_frame, renderer=None):
         """Match the frame of the model to the frame of this observation.
@@ -194,30 +74,6 @@ class Observation(Frame):
         -------
         None
         """
-        if (self.wavelengths is None) != (model_frame.wavelengths is None):
-            raise ValueError(
-                "model and observation must either both declare wavelengths or neither"
-            )
-        if self.wavelengths is not None:
-            model_channels = list(model_frame.channels)
-            try:
-                indices = [model_channels.index(channel) for channel in self.channels]
-            except ValueError as error:
-                raise ValueError(
-                    "observation channel is absent from the model frame"
-                ) from error
-            model_wavelengths = model_frame.wavelengths[indices].to_value(u.m)
-            observed_wavelengths = self.wavelengths.to_value(u.m)
-            if not np.allclose(
-                model_wavelengths,
-                observed_wavelengths,
-                rtol=1e-10,
-                atol=0.0,
-            ):
-                raise ValueError(
-                    "model and observation wavelengths disagree after channel mapping"
-                )
-
         self.model_frame = model_frame
 
         # check dtype consistency
@@ -298,10 +154,6 @@ class Observation(Frame):
         model: array
             The model from `Blend`
         parameters: tuple of optimization parameters
-        channel_chunk_size: int or None
-            If set, render and score this many adjacent observation channels
-            at a time. This reduces peak memory for large IFU cubes when the
-            renderer supports channel chunking.
 
         Returns
         -------

@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from astropy.io import fits
 
-from benchmarks.ifu_parity_metrics import morphology_metrics, translate_morphology
+from benchmarks.collaborator_metrics import morphology_metrics, translate_morphology
 
 
 def _parser():
@@ -62,16 +62,6 @@ def _load(args):
         collapsed_residual = np.asarray(
             product["collapsed_whitened_residual"], dtype=float
         )
-        spectral_envelopes = (
-            (
-                np.asarray(product["structural_sed1_lower"], dtype=float),
-                np.asarray(product["structural_sed1_upper"], dtype=float),
-            ),
-            (
-                np.asarray(product["structural_sed2_lower"], dtype=float),
-                np.asarray(product["structural_sed2_upper"], dtype=float),
-            ),
-        )
 
     np.testing.assert_allclose(wavelength, truth_wavelength, rtol=0, atol=1e-10)
     if len(report["sources"]) != 2:
@@ -99,7 +89,6 @@ def _load(args):
         "spectra": spectra,
         "morphologies": morphologies,
         "collapsed_residual": collapsed_residual,
-        "spectral_envelopes": spectral_envelopes,
         "truth_spectra": truth_spectra,
         "truth_morphologies": truth_morphologies,
         "morphology_scores": morphology_scores,
@@ -114,15 +103,6 @@ def _plot_spectra(values, output, dpi):
         score = values["report"]["sources"][source]["spectrum"]
         truth = values["truth_spectra"][source]
         fitted = values["spectra"][source]
-        lower, upper = values["spectral_envelopes"][source]
-        axes[0, source].fill_between(
-            values["wavelength"],
-            lower,
-            upper,
-            color="#56B4E9",
-            alpha=0.35,
-            label="exact structural envelope",
-        )
         axes[0, source].plot(
             values["wavelength"],
             truth,
@@ -164,9 +144,7 @@ def _plot_spectra(values, output, dpi):
         axes[2, source].set_xlabel("wavelength (µm)")
         axes[2, source].set_ylabel("24-bin (Scarlet − truth) / truth (%)")
         axes[2, source].grid(alpha=0.2)
-    figure.suptitle(
-        "Scarlet collaborator recovery; envelope is structural, not ±1σ"
-    )
+    figure.suptitle("Scarlet collaborator recovery")
     figure.savefig(output, dpi=dpi)
     plt.close(figure)
 
