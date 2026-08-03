@@ -3,11 +3,18 @@
 # as a template to integrate pybind11
 
 import os
+import importlib.util
 from setuptools import setup, Extension, find_packages
 from setuptools.command.build_ext import build_ext
 import sys
 import setuptools
-import version
+
+
+version_spec = importlib.util.spec_from_file_location(
+    "scarlet_version", os.path.join(os.path.dirname(__file__), "version.py")
+)
+version = importlib.util.module_from_spec(version_spec)
+version_spec.loader.exec_module(version)
 
 pybind11_path = None
 if "PYBIND11_DIR" in os.environ:
@@ -137,7 +144,14 @@ class BuildExt(build_ext):
         build_ext.build_extensions(self)
 
 
-install_requires = ["numpy", "scipy", "astropy", "proxmin>=0.6.11", "autograd>=1.3"]
+install_requires = [
+    "numpy",
+    "scipy",
+    "astropy",
+    "matplotlib",
+    "proxmin>=0.6.11",
+    "autograd>=1.3",
+]
 # Only require the pybind11 and peigen packages if
 # the C++ headers are not already installed
 if pybind11_path is None:

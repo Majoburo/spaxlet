@@ -21,9 +21,40 @@ If you make use of scarlet, please acknowledge [Melchior et al. (2018)](https://
 
 ## Prerequisites
 
-The code runs on python>=3.5. In addition, you'll need
+Python 3.11 is recommended for the collaborator reproduction. In addition,
+you'll need
 
 * numpy
 * pybind11
 * autograd
 * [proxmin](https://github.com/pmelchior/proxmin)
+
+## macOS development install
+
+Install the Xcode Command Line Tools and Python 3.11, then create an isolated
+environment from the repository root:
+
+```bash
+xcode-select --install  # skip this when the tools are already installed
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+python -m pip install matplotlib jupyter
+```
+
+The build uses the native macOS architecture (including Apple Silicon). The
+`pyproject.toml` build requirements ensure that the C++ extension headers are
+available during pip's isolated editable build.
+
+To avoid Matplotlib/font-cache warnings on a machine where the home cache is
+not writable, set a project-local cache before starting Jupyter:
+
+```bash
+export MPLCONFIGDIR="$PWD/.matplotlib"
+mkdir -p "$MPLCONFIGDIR"
+jupyter lab benchmarks/collaborator_reproduction.ipynb
+```
+
+See `benchmarks/README.md` for the required FITS inputs and the full declared
+A/B/C reproduction configuration.

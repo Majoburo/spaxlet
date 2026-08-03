@@ -7,6 +7,7 @@ dist/
 *.eggs
 *.so
 .ipynb_checkpoints/
+.venv/
 tmp/
 include/
 _version.txt
@@ -15,3 +16,5 @@ docs/_build
 docs/api
 docs/_templates
 docs/hsc_cosmos_35.sca
+data/collaborator/
+benchmark_artifacts/

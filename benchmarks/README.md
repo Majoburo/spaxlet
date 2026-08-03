@@ -1,5 +1,40 @@
 # lisasep IFU parity harness
 
+## macOS collaborator setup
+
+The full collaborator notebook is supported on Intel and Apple Silicon macOS
+with Python 3.11. From a fresh clone of this branch:
+
+```bash
+xcode-select -p
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+python -m pip install matplotlib jupyter
+export MPLCONFIGDIR="$PWD/.matplotlib"
+mkdir -p "$MPLCONFIGDIR"
+```
+
+If `xcode-select -p` fails, install Apple's command-line developer tools with
+`xcode-select --install`, then repeat the install. Put these two files in a
+single data directory outside Git:
+
+- `morphology_galaxy_cube_004.fits`
+- `nirspec_ifu_PRISM_CLEAR_allwave.cube.fits`
+
+Start Jupyter from the repository root:
+
+```bash
+jupyter lab benchmarks/collaborator_reproduction.ipynb
+```
+
+Change only `DATA_ROOT` in the configuration cell, then run all cells. The
+notebook executes the predeclared A/B/C starts with variable projection,
+`centroid_psf`, float64, a 1500-iteration cap, and all 940 wavelength channels.
+It can require several gigabytes of memory and substantial runtime; closing
+other memory-heavy applications is recommended.
+
 The fixtures in `ifu_parity_contracts.py` pin the 17x19 operator cases and the
 six-channel end-to-end feature matrix before production behavior is changed.
 They include a compatible null, a close smooth blend, and a deliberately
