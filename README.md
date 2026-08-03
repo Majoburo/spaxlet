@@ -29,32 +29,7 @@ you'll need
 * autograd
 * [proxmin](https://github.com/pmelchior/proxmin)
 
-## macOS development install
+## Collaborator notebook
 
-Install the Xcode Command Line Tools and Python 3.11, then create an isolated
-environment from the repository root:
-
-```bash
-xcode-select --install  # skip this when the tools are already installed
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
-python -m pip install matplotlib jupyter
-```
-
-The build uses the native macOS architecture (including Apple Silicon). The
-`pyproject.toml` build requirements ensure that the C++ extension headers are
-available during pip's isolated editable build.
-
-To avoid Matplotlib/font-cache warnings on a machine where the home cache is
-not writable, set a project-local cache before starting Jupyter:
-
-```bash
-export MPLCONFIGDIR="$PWD/.matplotlib"
-mkdir -p "$MPLCONFIGDIR"
-jupyter lab benchmarks/collaborator_reproduction.ipynb
-```
-
-See `benchmarks/README.md` for the required FITS inputs and the full declared
-A/B/C reproduction configuration.
+See the [macOS collaborator setup](benchmarks/README.md#macos-collaborator-setup)
+for the installation, data, and notebook instructions.
