@@ -2,8 +2,8 @@ from functools import partial
 from autograd import grad
 
 import numpy as np
-import scarlet
-import scarlet.fft as fft
+import spaxlet
+import spaxlet.fft as fft
 from numpy.testing import assert_allclose, assert_array_equal, assert_almost_equal
 
 
@@ -81,7 +81,7 @@ class TestCentering(object):
 class TestFourier(object):
     def get_psfs(self, sigmas):
         boxsize = 41
-        psf = scarlet.GaussianPSF(sigmas, boxsize=boxsize)
+        psf = spaxlet.GaussianPSF(sigmas, boxsize=boxsize)
         return psf.get_model()
 
     """Test the Fourier object"""
@@ -90,9 +90,9 @@ class TestFourier(object):
         """Test matching two 2D psfs
         """
         # Narrow PSF
-        psf1 = scarlet.fft.Fourier(self.get_psfs(1))
+        psf1 = spaxlet.fft.Fourier(self.get_psfs(1))
         # Wide PSF
-        psf2 = scarlet.fft.Fourier(self.get_psfs(2))
+        psf2 = spaxlet.fft.Fourier(self.get_psfs(2))
 
         # Test narrow to wide
         kernel_1to2 = fft.match_psf(psf2, psf1)
@@ -108,9 +108,9 @@ class TestFourier(object):
         """Test matching two PSFs with a spectral dimension
         """
         # Narrow PSF
-        psf1 = scarlet.fft.Fourier(self.get_psfs(1))
+        psf1 = spaxlet.fft.Fourier(self.get_psfs(1))
         # Wide PSF
-        psf2 = scarlet.fft.Fourier(self.get_psfs((1, 2, 3)))
+        psf2 = spaxlet.fft.Fourier(self.get_psfs((1, 2, 3)))
 
         # Nawrrow to wide
         kernel_1to2 = fft.match_psf(psf2, psf1)

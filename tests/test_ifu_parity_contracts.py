@@ -3,7 +3,7 @@
 import numpy as np
 import unittest
 
-import scarlet
+import spaxlet
 from benchmarks.ifu_parity_contracts import (
     CASE_NAMES,
     DEBLEND_SHAPE,
@@ -25,14 +25,14 @@ def _relative_l2(value, reference):
 
 def _project(feature, value):
     if feature == "symmetry":
-        return scarlet.operator.prox_uncentered_symmetry(
+        return spaxlet.operator.prox_uncentered_symmetry(
             value.copy(),
             0.0,
             center=OPERATOR_CENTER,
             algorithm="soft",
             strength=1.0,
         )
-    prox = scarlet.operator.prox_weighted_monotonic(
+    prox = spaxlet.operator.prox_weighted_monotonic(
         OPERATOR_SHAPE,
         center=OPERATOR_CENTER,
         neighbor_weight=feature,
@@ -49,10 +49,10 @@ class IFUParityContracts(unittest.TestCase):
         value[0, 0] = 4
         value[0, -1] = 7
         value[center] = -2
-        constraint = scarlet.ConstraintChain(
-            scarlet.SymmetryConstraint(center=center),
-            scarlet.PositivityConstraint(),
-            scarlet.CenterOnConstraint(center=center, tiny=1e-5),
+        constraint = spaxlet.ConstraintChain(
+            spaxlet.SymmetryConstraint(center=center),
+            spaxlet.PositivityConstraint(),
+            spaxlet.CenterOnConstraint(center=center, tiny=1e-5),
         )
 
         result = constraint(value.copy(), 0)
@@ -133,15 +133,15 @@ class IFUParityContracts(unittest.TestCase):
     def test_scarlet_delta_frame_matches_declared_forward_model(self):
         channels = list(range(N_CHANNELS))
         kernels = np.asarray([gaussian_kernel()] * N_CHANNELS)
-        delta_psf = scarlet.DeltaPSF(N_CHANNELS)
-        frame = scarlet.Frame(
+        delta_psf = spaxlet.DeltaPSF(N_CHANNELS)
+        frame = spaxlet.Frame(
             (N_CHANNELS,) + DEBLEND_SHAPE,
             psf=delta_psf,
             channels=channels,
         )
-        observation = scarlet.Observation(
+        observation = spaxlet.Observation(
             np.zeros(frame.shape),
-            psf=scarlet.ImagePSF(kernels),
+            psf=spaxlet.ImagePSF(kernels),
             weights=np.ones(frame.shape),
             channels=channels,
         ).match(frame)
@@ -150,14 +150,14 @@ class IFUParityContracts(unittest.TestCase):
         declared = noiseless_cube(case)
         self.assertLess(_relative_l2(rendered, declared), 1e-7)
 
-        old_frame = scarlet.Frame(
+        old_frame = spaxlet.Frame(
             frame.shape,
-            psf=scarlet.GaussianPSF(sigma=0.3),
+            psf=spaxlet.GaussianPSF(sigma=0.3),
             channels=channels,
         )
-        old_observation = scarlet.Observation(
+        old_observation = spaxlet.Observation(
             np.zeros(frame.shape),
-            psf=scarlet.ImagePSF(kernels),
+            psf=spaxlet.ImagePSF(kernels),
             weights=np.ones(frame.shape),
             channels=channels,
         ).match(old_frame)

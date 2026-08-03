@@ -7,7 +7,7 @@ from astropy import units as u
 from autograd import grad
 from scipy.signal import convolve2d, correlate2d
 
-import scarlet
+import spaxlet
 
 
 CHANNELS = ("a", "b", "c")
@@ -36,22 +36,22 @@ def _field_psfs():
 class IFUVaryingRendererTest(unittest.TestCase):
     def _frames(self, field_psfs=None):
         wavelengths = np.array([1.0, 1.1, 1.2]) * u.um
-        frame = scarlet.Frame(
+        frame = spaxlet.Frame(
             (3, *SHAPE),
             channels=CHANNELS,
-            psf=scarlet.DeltaPSF(3),
+            psf=spaxlet.DeltaPSF(3),
             wavelengths=wavelengths,
             dtype=np.float64,
         )
-        observation = scarlet.Observation(
+        observation = spaxlet.Observation(
             np.zeros((2, *SHAPE), dtype=float),
             channels=OBSERVED_CHANNELS,
-            psf=scarlet.DeltaPSF(2),
+            psf=spaxlet.DeltaPSF(2),
             wavelengths=wavelengths[[0, 2]],
         )
         if field_psfs is None:
             field_psfs = _field_psfs()
-        renderer = scarlet.SpatiallyVaryingConvolutionRenderer(
+        renderer = spaxlet.SpatiallyVaryingConvolutionRenderer(
             observation, frame, field_psfs, ANCHORS
         )
         return frame, observation.match(frame, renderer=renderer)
@@ -60,7 +60,7 @@ class IFUVaryingRendererTest(unittest.TestCase):
         _, observation = self._frames()
         rng = np.random.default_rng(4)
         model = rng.normal(size=(3, *SHAPE))
-        weights = scarlet.spatial_interpolation_weights(ANCHORS, SHAPE)
+        weights = spaxlet.spatial_interpolation_weights(ANCHORS, SHAPE)
         psfs = _field_psfs()
         expected = np.zeros((2, *SHAPE))
         for channel, model_channel in enumerate((0, 2)):
@@ -90,7 +90,7 @@ class IFUVaryingRendererTest(unittest.TestCase):
             lambda value: np.sum(observation.render(value) * observed)
         )(model)
 
-        weights = scarlet.spatial_interpolation_weights(ANCHORS, SHAPE)
+        weights = spaxlet.spatial_interpolation_weights(ANCHORS, SHAPE)
         psfs = _field_psfs()
         expected = np.zeros_like(model)
         for channel, model_channel in enumerate((0, 2)):
@@ -105,10 +105,10 @@ class IFUVaryingRendererTest(unittest.TestCase):
         base = np.stack((_kernel(0, -1), _kernel(1, 0)))
         field_psfs = np.repeat(base[:, None], 4, axis=1)
         frame, varying = self._frames(field_psfs)
-        regular = scarlet.Observation(
+        regular = spaxlet.Observation(
             np.zeros((2, *SHAPE), dtype=float),
             channels=OBSERVED_CHANNELS,
-            psf=scarlet.ImagePSF(base.copy()),
+            psf=spaxlet.ImagePSF(base.copy()),
             wavelengths=np.array([1.0, 1.2]) * u.um,
         ).match(frame)
         model = np.random.default_rng(10).normal(size=(3, *SHAPE))
@@ -117,7 +117,7 @@ class IFUVaryingRendererTest(unittest.TestCase):
         )
 
     def test_interpolation_is_a_partition_of_unity(self):
-        weights = scarlet.spatial_interpolation_weights(ANCHORS, SHAPE)
+        weights = spaxlet.spatial_interpolation_weights(ANCHORS, SHAPE)
         self.assertEqual(weights.shape, (4, *SHAPE))
         np.testing.assert_allclose(np.sum(weights, axis=0), 1, rtol=0, atol=3e-16)
         np.testing.assert_array_equal(weights[:, 1, 2], [1, 0, 0, 0])
@@ -134,21 +134,21 @@ class IFUVaryingRendererTest(unittest.TestCase):
 
     def test_non_delta_model_frame_is_rejected(self):
         wavelengths = np.array([1.0, 1.2]) * u.um
-        frame = scarlet.Frame(
+        frame = spaxlet.Frame(
             (2, *SHAPE),
             channels=OBSERVED_CHANNELS,
-            psf=scarlet.GaussianPSF(np.array([0.3, 0.3])),
+            psf=spaxlet.GaussianPSF(np.array([0.3, 0.3])),
             wavelengths=wavelengths,
             dtype=np.float64,
         )
-        observation = scarlet.Observation(
+        observation = spaxlet.Observation(
             np.zeros((2, *SHAPE)),
             channels=OBSERVED_CHANNELS,
-            psf=scarlet.DeltaPSF(2),
+            psf=spaxlet.DeltaPSF(2),
             wavelengths=wavelengths,
         )
         with self.assertRaisesRegex(ValueError, "DeltaPSF"):
-            scarlet.SpatiallyVaryingConvolutionRenderer(
+            spaxlet.SpatiallyVaryingConvolutionRenderer(
                 observation, frame, _field_psfs(), ANCHORS
             )
 
@@ -163,7 +163,7 @@ class IFUVaryingRendererTest(unittest.TestCase):
         for psfs, anchors in invalid:
             with self.subTest(shape=psfs.shape, anchors=anchors):
                 with self.assertRaises(ValueError):
-                    scarlet.SpatiallyVaryingConvolutionRenderer(
+                    spaxlet.SpatiallyVaryingConvolutionRenderer(
                         observation, frame, psfs, anchors
                     )
 

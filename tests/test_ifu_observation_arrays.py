@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 from astropy import units as u
 
-import scarlet
+import spaxlet
 
 
 class IFUObservationArraysTest(unittest.TestCase):
@@ -25,13 +25,13 @@ class IFUObservationArraysTest(unittest.TestCase):
         dq[2, 0, 0] = 1
         dq[2, 0, 1] = 2
 
-        observation = scarlet.Observation.from_ifu_arrays(
+        observation = spaxlet.Observation.from_ifu_arrays(
             data,
             np.array([1.0, 1.1, 1.2]) * u.um,
             variance,
             dq=dq,
             dq_bad_bits=2,
-            psf=scarlet.DeltaPSF(3),
+            psf=spaxlet.DeltaPSF(3),
         )
 
         self.assertTrue(np.isnan(data[0, 0, 0]))
@@ -51,12 +51,12 @@ class IFUObservationArraysTest(unittest.TestCase):
         data, variance, dq = self._arrays()
         dq[0, 0, 0] = 1
         dq[0, 0, 1] = 8
-        observation = scarlet.Observation.from_ifu_arrays(
+        observation = spaxlet.Observation.from_ifu_arrays(
             data,
             np.array([1.0, 1.1, 1.2]) * u.um,
             variance,
             dq=dq,
-            psf=scarlet.DeltaPSF(3),
+            psf=spaxlet.DeltaPSF(3),
         )
         self.assertEqual(np.count_nonzero(observation.weights == 0), 2)
 
@@ -64,12 +64,12 @@ class IFUObservationArraysTest(unittest.TestCase):
         data, variance, _ = self._arrays()
         data[1] = np.nan
         variance[1] = np.inf
-        psf = scarlet.DeltaPSF(3)
+        psf = spaxlet.DeltaPSF(3)
         wavelengths = np.array([1.0, 1.1, 1.2]) * u.um
-        observation = scarlet.Observation.from_ifu_arrays(
+        observation = spaxlet.Observation.from_ifu_arrays(
             data, wavelengths, variance, psf=psf
         )
-        frame = scarlet.Frame(
+        frame = spaxlet.Frame(
             data.shape,
             channels=observation.channels,
             psf=psf,
@@ -82,23 +82,23 @@ class IFUObservationArraysTest(unittest.TestCase):
     def test_clean_arrays_match_legacy_observation_exactly(self):
         data, variance, _ = self._arrays()
         wavelengths = np.array([1.0, 1.1, 1.2]) * u.um
-        psf = scarlet.DeltaPSF(3)
+        psf = spaxlet.DeltaPSF(3)
         channels = ("a", "b", "c")
 
-        legacy = scarlet.Observation(
+        legacy = spaxlet.Observation(
             data,
             psf=psf,
             weights=1.0 / variance,
             channels=channels,
-        ).match(scarlet.Frame(data.shape, psf=psf, channels=channels))
-        ingested = scarlet.Observation.from_ifu_arrays(
+        ).match(spaxlet.Frame(data.shape, psf=psf, channels=channels))
+        ingested = spaxlet.Observation.from_ifu_arrays(
             data,
             wavelengths,
             variance,
             psf=psf,
             channels=channels,
         ).match(
-            scarlet.Frame(
+            spaxlet.Frame(
                 data.shape,
                 psf=psf,
                 channels=channels,
@@ -118,22 +118,22 @@ class IFUObservationArraysTest(unittest.TestCase):
         data, variance, dq = self._arrays()
         wavelengths = np.array([1.0, 1.1, 1.2]) * u.um
         invalid_calls = (
-            lambda: scarlet.Observation.from_ifu_arrays(
+            lambda: spaxlet.Observation.from_ifu_arrays(
                 data[0], wavelengths, variance[0]
             ),
-            lambda: scarlet.Observation.from_ifu_arrays(
+            lambda: spaxlet.Observation.from_ifu_arrays(
                 data, wavelengths, variance[:, :, :2]
             ),
-            lambda: scarlet.Observation.from_ifu_arrays(
+            lambda: spaxlet.Observation.from_ifu_arrays(
                 data, wavelengths, variance, dq=dq[:, :, :2]
             ),
-            lambda: scarlet.Observation.from_ifu_arrays(
+            lambda: spaxlet.Observation.from_ifu_arrays(
                 data, wavelengths, variance, dq=dq.astype(float)
             ),
-            lambda: scarlet.Observation.from_ifu_arrays(
+            lambda: spaxlet.Observation.from_ifu_arrays(
                 data, wavelengths, variance, dq_bad_bits=1
             ),
-            lambda: scarlet.Observation.from_ifu_arrays(
+            lambda: spaxlet.Observation.from_ifu_arrays(
                 data, wavelengths, variance, dtype=np.int64
             ),
         )

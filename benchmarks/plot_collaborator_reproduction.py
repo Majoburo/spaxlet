@@ -37,7 +37,7 @@ def _normalized(value):
 def _load(args):
     metrics_path = args.metrics
     if metrics_path is None:
-        metrics_path = args.product.with_name("scarlet_matched_metrics.json")
+        metrics_path = args.product.with_name("spaxlet_matched_metrics.json")
     report = json.loads(metrics_path.read_text())
     truth_path = args.truth if args.truth is not None else Path(report["truth"])
     with fits.open(truth_path) as hdul:
@@ -268,13 +268,13 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
     values = _load(args)
     _plot_spectra(
-        values, args.output_dir / "scarlet_collaborator_spectra.png", args.dpi
+        values, args.output_dir / "spaxlet_collaborator_spectra.png", args.dpi
     )
     _plot_morphologies(
-        values, args.output_dir / "scarlet_collaborator_morphologies.png", args.dpi
+        values, args.output_dir / "spaxlet_collaborator_morphologies.png", args.dpi
     )
     _plot_residual_and_metrics(
-        values, args.output_dir / "scarlet_collaborator_residual.png", args.dpi
+        values, args.output_dir / "spaxlet_collaborator_residual.png", args.dpi
     )
     print("wrote {}".format(args.output_dir.resolve()))
 

@@ -1,6 +1,6 @@
 import os,glob
 
-source_files = glob.glob('../scarlet/[a-z0-9]*.py', recursive=True)
+source_files = glob.glob('../spaxlet/[a-z0-9]*.py', recursive=True)
 sources = sorted([ ".".join(f[3:-3].split("/")) for f in source_files ])
 
 try:
@@ -9,7 +9,7 @@ except FileExistsError:
     pass
 
 # create overview
-filename = "api/scarlet.rst"
+filename = "api/spaxlet.rst"
 with open(filename, "w") as fp:
     fp.write("API Documentation\n")
     fp.write("=================\n\n")

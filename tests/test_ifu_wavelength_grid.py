@@ -6,17 +6,17 @@ import numpy as np
 from autograd import grad
 from astropy import units as u
 
-import scarlet
+import spaxlet
 
 
 class IFUWavelengthGridTest(unittest.TestCase):
     def _frame(self, wavelengths=None, channels=None):
         if channels is None:
             channels = ["a", "b", "c"]
-        return scarlet.Frame(
+        return spaxlet.Frame(
             (len(channels), 5, 7),
             channels=channels,
-            psf=scarlet.DeltaPSF(len(channels)),
+            psf=spaxlet.DeltaPSF(len(channels)),
             wavelengths=wavelengths,
         )
 
@@ -24,8 +24,8 @@ class IFUWavelengthGridTest(unittest.TestCase):
         if channels is None:
             channels = ["a", "b", "c"]
         if psf is None:
-            psf = scarlet.DeltaPSF(len(channels))
-        return scarlet.Observation(
+            psf = spaxlet.DeltaPSF(len(channels))
+        return spaxlet.Observation(
             np.zeros((len(channels), 5, 7)),
             channels=channels,
             psf=psf,
@@ -65,28 +65,28 @@ class IFUWavelengthGridTest(unittest.TestCase):
             observed_psfs[index, 1, 1] = 1
             observed_psfs[index, 0, 1] = 0.1 * (index + 1)
 
-        full_frame = scarlet.Frame(
+        full_frame = spaxlet.Frame(
             (4, 5, 7),
             channels=["a", "b", "c", "d"],
-            psf=scarlet.ImagePSF(model_psfs.copy()),
+            psf=spaxlet.ImagePSF(model_psfs.copy()),
             wavelengths=np.array([1.0, 1.1, 1.2, 1.3]) * u.um,
         )
         observation = self._observation(
             np.array([1.0, 1.2]) * u.um,
             channels=["a", "c"],
-            psf=scarlet.ImagePSF(observed_psfs.copy()),
+            psf=spaxlet.ImagePSF(observed_psfs.copy()),
         ).match(full_frame)
 
-        subset_frame = scarlet.Frame(
+        subset_frame = spaxlet.Frame(
             (2, 5, 7),
             channels=["a", "c"],
-            psf=scarlet.ImagePSF(model_psfs[[0, 2]].copy()),
+            psf=spaxlet.ImagePSF(model_psfs[[0, 2]].copy()),
             wavelengths=np.array([1.0, 1.2]) * u.um,
         )
         reference = self._observation(
             np.array([1.0, 1.2]) * u.um,
             channels=["a", "c"],
-            psf=scarlet.ImagePSF(observed_psfs.copy()),
+            psf=spaxlet.ImagePSF(observed_psfs.copy()),
         ).match(subset_frame)
 
         model = np.arange(4 * 5 * 7, dtype=float).reshape(4, 5, 7)

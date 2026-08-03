@@ -23,7 +23,7 @@ Run both repositories through the existing comparison drivers:
 ```bash
 python benchmarks/run_lisasep_parity.py \
   --lisasep /path/to/lisasep \
-  --python /path/to/venv-scarlet/bin/python
+  --python /path/to/venv-spaxlet/bin/python
 ```
 
 Use `--operator-only` for the sub-second projection gate. The complete command

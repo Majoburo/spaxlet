@@ -1,10 +1,11 @@
 :tocdepth: 3
 
-*scarlet* Documentation
+*spaxlet* Documentation
 =======================
 
-*scarlet* is an open source python library for modeling astronomical sources from
-multi-band, multi-epoch, and multi-instrument data.
+*spaxlet* is an open source python library for modeling astronomical sources from
+multi-band, multi-epoch, and multi-instrument data. It is a fork of
+`scarlet <https://github.com/pmelchior/scarlet>`_.
 
 .. _getting_started:
 
@@ -18,7 +19,7 @@ Getting Started
    0-quickstart
    1-concepts
    tutorials
-   api/scarlet
+   api/spaxlet
    regression
 
 Change Log

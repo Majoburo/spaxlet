@@ -4,24 +4,24 @@ import unittest
 
 import numpy as np
 
-import scarlet
-from scarlet.model import UpdateException
+import spaxlet
+from spaxlet.model import UpdateException
 
 
 def _centroid_constraint(chain):
     return next(
         constraint
         for constraint in chain.constraints
-        if isinstance(constraint, scarlet.CentroidConstraint)
+        if isinstance(constraint, spaxlet.CentroidConstraint)
     )
 
 
 class SupportResizeConstraintTest(unittest.TestCase):
     def _morphology(self, shape, center, origin, value, *, grow=False):
-        frame = scarlet.Frame((1, 61, 71), channels=[0])
-        constraint = scarlet.DykstraConstraintChain(
-            scarlet.CentroidConstraint(center),
-            scarlet.PositivityConstraint(),
+        frame = spaxlet.Frame((1, 61, 71), channels=[0])
+        constraint = spaxlet.DykstraConstraintChain(
+            spaxlet.CentroidConstraint(center),
+            spaxlet.PositivityConstraint(),
         )
         keywords = {}
         if grow:
@@ -30,17 +30,17 @@ class SupportResizeConstraintTest(unittest.TestCase):
                 "v": np.ones(shape),
                 "vhat": np.ones(shape),
             }
-        image = scarlet.Parameter(
+        image = spaxlet.Parameter(
             value,
             name="image",
             step=1.0,
             constraint=constraint,
             **keywords
         )
-        return scarlet.ImageMorphology(
+        return spaxlet.ImageMorphology(
             frame,
             image,
-            bbox=scarlet.Box(shape, origin=origin),
+            bbox=spaxlet.Box(shape, origin=origin),
             resizing=True,
         )
 
@@ -83,10 +83,10 @@ class SupportResizeConstraintTest(unittest.TestCase):
         self.assertEqual(shifted.center, (8.0, 12.0))
 
     def test_nested_explicit_centers_shift_together(self):
-        chain = scarlet.ConstraintChain(
-            scarlet.MonotonicityConstraint(center=(4, 7)),
-            scarlet.SymmetryConstraint(center=(4, 7)),
-            scarlet.CenterOnConstraint(center=(4, 7)),
+        chain = spaxlet.ConstraintChain(
+            spaxlet.MonotonicityConstraint(center=(4, 7)),
+            spaxlet.SymmetryConstraint(center=(4, 7)),
+            spaxlet.CenterOnConstraint(center=(4, 7)),
         ).shifted((3, -2))
         self.assertEqual(
             tuple(constraint.center for constraint in chain.constraints),
@@ -94,12 +94,12 @@ class SupportResizeConstraintTest(unittest.TestCase):
         )
 
     def test_coordinate_free_constraint_is_reused(self):
-        constraint = scarlet.PositivityConstraint()
+        constraint = spaxlet.PositivityConstraint()
         self.assertIs(constraint.shifted((5, 5)), constraint)
 
     def test_integer_center_rejects_fractional_grid_shift(self):
         with self.assertRaisesRegex(ValueError, "integer shift"):
-            scarlet.CenterOnConstraint(center=(4, 7)).shifted((0.5, 1))
+            spaxlet.CenterOnConstraint(center=(4, 7)).shifted((0.5, 1))
 
 
 if __name__ == "__main__":

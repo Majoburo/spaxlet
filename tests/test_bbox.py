@@ -1,5 +1,5 @@
 import numpy as np
-import scarlet
+import spaxlet
 
 
 class TestBox(object):
@@ -7,18 +7,18 @@ class TestBox(object):
         x = np.arange(25).reshape(5, 5)
         x[0] = 0
         x[:, -2:] = 0
-        bbox = scarlet.Box.from_data(x)
-        assert bbox == scarlet.Box((4, 3), origin=(1, 0))
+        bbox = spaxlet.Box.from_data(x)
+        assert bbox == spaxlet.Box((4, 3), origin=(1, 0))
 
         x += 10
-        bbox = scarlet.Box.from_data(x)
-        assert bbox == scarlet.Box((5, 5), origin=(0, 0))
+        bbox = spaxlet.Box.from_data(x)
+        assert bbox == spaxlet.Box((5, 5), origin=(0, 0))
 
-        bbox = scarlet.Box.from_data(x, min_value=10)
-        assert bbox == scarlet.Box((4, 3), origin=(1, 0))
+        bbox = spaxlet.Box.from_data(x, min_value=10)
+        assert bbox == spaxlet.Box((4, 3), origin=(1, 0))
 
     def test_contains(self):
-        bbox = scarlet.Box((6, 4, 3), origin=(0, 1, 0))
+        bbox = spaxlet.Box((6, 4, 3), origin=(0, 1, 0))
         p = (2, 2, 2)
         assert bbox.contains(p)
 
@@ -36,12 +36,12 @@ class TestBox(object):
         image[1, 1, 1] = 1
 
         # simple one pixel box extraction
-        bbox = scarlet.Box.from_data(image)
+        bbox = spaxlet.Box.from_data(image)
         extracted = bbox.extract_from(image)
         assert extracted.shape == (1, 1, 1) and extracted[0, 0, 0] == 1
 
         # offset box extraction past boundary of image
-        bbox = scarlet.Box.from_bounds((0, 3), (-2, 3), (-3, 2))
+        bbox = spaxlet.Box.from_bounds((0, 3), (-2, 3), (-3, 2))
         extracted = bbox.extract_from(image)
         assert extracted.shape == (3, 5, 5) and extracted[1, 3, 4] == 1
 
@@ -49,6 +49,6 @@ class TestBox(object):
         image = np.zeros((3, 5, 5))
         sub = np.zeros((3, 5, 5))
         sub[1, 3, 4] = 1
-        bbox = scarlet.Box.from_bounds((0, 3), (-2, 3), (-3, 2))
+        bbox = spaxlet.Box.from_bounds((0, 3), (-2, 3), (-3, 2))
         image = bbox.insert_into(image, sub)
         assert image.shape == (3, 5, 5) and image[1, 1, 1] == 1

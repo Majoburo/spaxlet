@@ -2,21 +2,21 @@
 
 import numpy as np
 
-import scarlet
+import spaxlet
 
 
 def _sources(spectra, morphologies):
     shape = (len(spectra[0]),) + morphologies[0].shape
-    frame = scarlet.Frame(
+    frame = spaxlet.Frame(
         shape,
-        psf=scarlet.DeltaPSF(shape[0]),
+        psf=spaxlet.DeltaPSF(shape[0]),
         channels=np.arange(shape[0]),
     )
     return [
-        scarlet.FactorizedComponent(
+        spaxlet.FactorizedComponent(
             frame,
-            scarlet.TabulatedSpectrum(frame, np.asarray(spectrum, dtype=float)),
-            scarlet.ImageMorphology(
+            spaxlet.TabulatedSpectrum(frame, np.asarray(spectrum, dtype=float)),
+            spaxlet.ImageMorphology(
                 frame, np.asarray(morphology, dtype=float), resizing=False
             ),
         )
@@ -32,7 +32,7 @@ class TestPairwiseMixingDiagnostics(object):
         )
         interval = [
             value
-            for value in scarlet.bilinear_mixing_intervals(sources)
+            for value in spaxlet.bilinear_mixing_intervals(sources)
             if value.donor == 0 and value.receiver == 1
         ][0]
         assert abs(interval.delta_min + 0.25) < 1e-12
@@ -52,7 +52,7 @@ class TestPairwiseMixingDiagnostics(object):
             spectrum[:, None, None] * spatial
             for spectrum, spatial in zip(spectra, morphologies)
         )
-        for interval in scarlet.bilinear_mixing_intervals(sources):
+        for interval in spaxlet.bilinear_mixing_intervals(sources):
             for delta in (interval.delta_min, interval.delta_max):
                 if not np.isfinite(delta):
                     continue
@@ -78,7 +78,7 @@ class TestPairwiseMixingDiagnostics(object):
             ([2.0, 4.0, 3.0], [1.0, 2.0, 5.0]),
             (morphology, np.flip(morphology) + 2.0),
         )
-        envelopes = scarlet.pairwise_mixing_envelopes(sources)
+        envelopes = spaxlet.pairwise_mixing_envelopes(sources)
         for source, envelope in zip(sources, envelopes):
             integrated = (
                 source.spectrum.get_model()
@@ -96,7 +96,7 @@ class TestPairwiseMixingDiagnostics(object):
         )
         sources[0].spectrum.parameters[0][0] = -1.0
         try:
-            scarlet.bilinear_mixing_intervals(sources)
+            spaxlet.bilinear_mixing_intervals(sources)
         except ValueError:
             pass
         else:

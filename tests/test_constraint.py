@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 from numpy.testing import assert_array_equal, assert_almost_equal
-import scarlet
+import spaxlet
 
 
 class TestUpdate(object):
@@ -9,12 +9,12 @@ class TestUpdate(object):
         X = np.random.rand(100) - 0.5
         step = 0
 
-        constraint = scarlet.PositivityConstraint()
+        constraint = spaxlet.PositivityConstraint()
         X_ = constraint(X, step)
         assert all(X_ >= 0)
 
         threshold = 0.1
-        constraint = scarlet.PositivityConstraint(zero=threshold)
+        constraint = spaxlet.PositivityConstraint(zero=threshold)
         X_ = constraint(X, step)
         assert all(X_ >= threshold)
 
@@ -23,12 +23,12 @@ class TestUpdate(object):
         step = 0
 
         X_ = X.copy()
-        constraint = scarlet.NormalizationConstraint(type="sum")
+        constraint = spaxlet.NormalizationConstraint(type="sum")
         X_ = constraint(X_, step)
         assert_almost_equal(X_, X / X.sum())
 
         X_ = X.copy()
-        constraint = scarlet.NormalizationConstraint(type="max")
+        constraint = spaxlet.NormalizationConstraint(type="max")
         X_ = constraint(X_, step)
         assert_almost_equal(X_, X / X.max())
 
@@ -38,14 +38,14 @@ class TestUpdate(object):
         thresh = 0.25
 
         X_ = X.copy()
-        constraint = scarlet.L0Constraint(thresh=thresh, type="relative")
+        constraint = spaxlet.L0Constraint(thresh=thresh, type="relative")
         X_ = constraint(X_, step)
         mask = np.abs(X) < thresh * step
         assert all(np.abs(X_[mask]) == 0)
         assert_array_equal(X_[~mask], X[~mask])
 
         X_ = X.copy()
-        constraint = scarlet.L0Constraint(thresh=thresh, type="absolute")
+        constraint = spaxlet.L0Constraint(thresh=thresh, type="absolute")
         X_ = constraint(X_, step)
         mask = np.abs(X) < thresh
         assert all(np.abs(X_[mask]) == 0)
@@ -57,7 +57,7 @@ class TestUpdate(object):
         thresh = 0.25
 
         X_ = X.copy()
-        constraint = scarlet.L1Constraint(thresh=thresh, type="relative")
+        constraint = spaxlet.L1Constraint(thresh=thresh, type="relative")
         X_ = constraint(X_, step)
         thresh_ = thresh * step
         mask = np.abs(X) < thresh_
@@ -65,7 +65,7 @@ class TestUpdate(object):
         assert_array_equal(np.abs(X_[~mask]), np.abs(np.abs(X[~mask]) - thresh_))
 
         X_ = X.copy()
-        constraint = scarlet.L1Constraint(thresh=thresh, type="absolute")
+        constraint = spaxlet.L1Constraint(thresh=thresh, type="absolute")
         X_ = constraint(X_, step)
         mask = np.abs(X) < thresh
         assert all(np.abs(X_[mask]) == 0)
@@ -76,12 +76,12 @@ class TestUpdate(object):
         np.random.seed(0)
         noise = np.random.rand(21, 21) * 2  # noise background to eliminate
         signal = np.zeros(noise.shape)
-        psf = scarlet.GaussianPSF(sigma=1, boxsize=21).get_model()
+        psf = spaxlet.GaussianPSF(sigma=1, boxsize=21).get_model()
         signal[7:14, 7:14] = psf[0, 7:14, 7:14]
         X = signal + noise
 
         step = 0
-        constraint = scarlet.ThresholdConstraint()
+        constraint = spaxlet.ThresholdConstraint()
         X_ = constraint(X, step)
 
         # regression test with thresh from reference version
@@ -96,7 +96,7 @@ class TestUpdate(object):
 
         step = 0
         X_ = X.copy()
-        constraint = scarlet.MonotonicityConstraint(
+        constraint = spaxlet.MonotonicityConstraint(
             neighbor_weight="nearest", min_gradient=0
         )
         X_ = constraint(X_, step)
@@ -110,7 +110,7 @@ class TestUpdate(object):
         assert_array_equal(X_, new_X)
 
         X_ = X.copy()
-        constraint = scarlet.MonotonicityConstraint(
+        constraint = spaxlet.MonotonicityConstraint(
             neighbor_weight="angle", min_gradient=0
         )
         X_ = constraint(X_, step)
@@ -124,7 +124,7 @@ class TestUpdate(object):
         assert_almost_equal(X_, new_X)
 
         X_ = X.copy()
-        constraint = scarlet.MonotonicityConstraint(
+        constraint = spaxlet.MonotonicityConstraint(
             neighbor_weight="angle", min_gradient=0.25
         )
         X_ = constraint(X_, step)
@@ -144,14 +144,14 @@ class TestUpdate(object):
         # symmetry
         step = 0
         X_ = X.copy()
-        constraint = scarlet.SymmetryConstraint()
+        constraint = spaxlet.SymmetryConstraint()
         X_ = constraint(X_, step)
         new_X = np.ones_like(X) * 12
         assert_almost_equal(X_, new_X)
 
         # symmetry at half strength
         X_ = X.copy()
-        constraint = scarlet.SymmetryConstraint(strength=0.5)
+        constraint = spaxlet.SymmetryConstraint(strength=0.5)
         X_ = constraint(X_, step)
         new_X = [
             [6.0, 6.5, 7.0, 7.5, 8.0],
@@ -166,7 +166,7 @@ class TestUpdate(object):
         shape = (5, 5)
         X = np.zeros(shape)
 
-        constraint = scarlet.CenterOnConstraint()
+        constraint = spaxlet.CenterOnConstraint()
         step = 0
         X = constraint(X, step)
         assert X[2, 2] > 0
@@ -182,19 +182,19 @@ class TestUpdate(object):
         )
         X[8, 8] += 2.5
 
-        expected_symmetry = scarlet.operator.prox_uncentered_symmetry(
+        expected_symmetry = spaxlet.operator.prox_uncentered_symmetry(
             X.copy(), 0, center=center, algorithm="soft", strength=1.0
         )
-        actual_symmetry = scarlet.SymmetryConstraint(center=center)(X.copy(), 0)
+        actual_symmetry = spaxlet.SymmetryConstraint(center=center)(X.copy(), 0)
         assert_almost_equal(actual_symmetry, expected_symmetry)
 
-        expected_monotonic = scarlet.operator.prox_weighted_monotonic(
+        expected_monotonic = spaxlet.operator.prox_weighted_monotonic(
             shape,
             center=center,
             neighbor_weight="angle",
             min_gradient=0.0,
         )(X.copy(), 0).reshape(shape)
-        actual_monotonic = scarlet.MonotonicityConstraint(
+        actual_monotonic = spaxlet.MonotonicityConstraint(
             center=center,
             neighbor_weight="angle",
             min_gradient=0.0,
@@ -202,16 +202,16 @@ class TestUpdate(object):
         assert_almost_equal(actual_monotonic, expected_monotonic)
 
         empty = np.zeros(shape)
-        revived = scarlet.CenterOnConstraint(center=center, tiny=1e-5)(empty, 0)
+        revived = spaxlet.CenterOnConstraint(center=center, tiny=1e-5)(empty, 0)
         assert revived[center] == 1e-5
         assert np.count_nonzero(revived) == 1
 
     def test_explicit_constraint_center_validation(self):
         X = np.ones((5, 7))
         constraints = (
-            scarlet.SymmetryConstraint(center=(5, 2)),
-            scarlet.MonotonicityConstraint(center=(1.5, 2)),
-            scarlet.CenterOnConstraint(center=(2,)),
+            spaxlet.SymmetryConstraint(center=(5, 2)),
+            spaxlet.MonotonicityConstraint(center=(1.5, 2)),
+            spaxlet.CenterOnConstraint(center=(2,)),
         )
         for constraint in constraints:
             with pytest.raises(ValueError):

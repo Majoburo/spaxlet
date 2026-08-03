@@ -1,5 +1,5 @@
 import numpy as np
-import scarlet
+import spaxlet
 import os
 
 
@@ -11,7 +11,7 @@ def SDR(X_true, X):
 def setup_scarlet(
     data_hr, wcs_hr, data_lr, wcs_lr, psf_hr, psf_lr, channels, coverage="union"
 ):
-    """Performs the initialisation steps for scarlet to run its resampling scheme
+    """Performs the initialisation steps for spaxlet to run its resampling scheme
     Prameters
     ---------
     data_hr: galsim Image
@@ -27,22 +27,22 @@ def setup_scarlet(
     Returns
     -------
     obs: array of observations
-        array of scarlet.Observation objects initialised for resampling
+        array of spaxlet.Observation objects initialised for resampling
     """
     # Extract data
     im_hr = data_hr[None, :, :]
     im_lr = data_lr[None, :, :]
     # define two observation objects and match to frame
-    obs_hr = scarlet.Observation(
-        im_hr, wcs=wcs_hr, psf=scarlet.ImagePSF(psf_hr), channels=[channels[1]]
+    obs_hr = spaxlet.Observation(
+        im_hr, wcs=wcs_hr, psf=spaxlet.ImagePSF(psf_hr), channels=[channels[1]]
     )
-    obs_lr = scarlet.Observation(
-        im_lr, wcs=wcs_lr, psf=scarlet.ImagePSF(psf_lr), channels=[channels[0]]
+    obs_lr = spaxlet.Observation(
+        im_lr, wcs=wcs_lr, psf=spaxlet.ImagePSF(psf_lr), channels=[channels[0]]
     )
     # Keep the order of the observations consistent with the `channels` parameter
     # This implementation is a bit of a hack and will be refined in the future
     obs = [obs_lr, obs_hr]
-    scarlet.Frame.from_observations(obs, obs_id=1, coverage=coverage)
+    spaxlet.Frame.from_observations(obs, obs_id=1, coverage=coverage)
     return obs
 
 

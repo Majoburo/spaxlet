@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# scarlet documentation build configuration file, created by
+# spaxlet documentation build configuration file, created by
 # sphinx-quickstart on Mon Feb 12 15:53:12 2018.
 #
 # This file is execfile()d with the current directory set to its
@@ -58,7 +58,7 @@ source_suffix = ".rst"
 master_doc = "index"
 
 # General information about the project.
-project = "scarlet"
+project = "spaxlet"
 copyright = "2018-2024, Fred Moolekamp and Peter Melchior"
 author = "Fred Moolekamp and Peter Melchior"
 
@@ -104,7 +104,7 @@ html_theme_options = {
     "fixed_sidebar": True,
     "github_button": True,
     "github_user": "pmelchior",
-    "github_repo": "scarlet",
+    "github_repo": "spaxlet",
     "github_type": "watch",
 }
 
@@ -163,8 +163,8 @@ latex_elements = {
 latex_documents = [
     (
         master_doc,
-        "scarlet.tex",
-        "scarlet Documentation",
+        "spaxlet.tex",
+        "spaxlet Documentation",
         "Fred Moolekamp and Peter Melchior",
         "manual",
     ),
@@ -175,7 +175,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [(master_doc, "scarlet", "scarlet Documentation", [author], 1)]
+man_pages = [(master_doc, "spaxlet", "spaxlet Documentation", [author], 1)]
 
 
 # -- Options for Texinfo output -------------------------------------------
@@ -186,10 +186,10 @@ man_pages = [(master_doc, "scarlet", "scarlet Documentation", [author], 1)]
 texinfo_documents = [
     (
         master_doc,
-        "scarlet",
-        "scarlet Documentation",
+        "spaxlet",
+        "spaxlet Documentation",
         author,
-        "scarlet",
+        "spaxlet",
         "One line description of project.",
         "Miscellaneous",
     ),

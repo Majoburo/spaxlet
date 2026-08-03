@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-import scarlet
+import spaxlet
 from benchmarks.run_collaborator_reproduction import (
     _catalog_order,
     _morphology_parameter,
@@ -23,7 +23,7 @@ class IFUCollaboratorFeatureTest(unittest.TestCase):
         value = np.arange(20, dtype=float).reshape(4, 5) + 1
         center = (1.2, 2.3)
         parameter = _morphology_parameter(value, "centroid", center)
-        self.assertIsInstance(parameter, scarlet.Parameter)
+        self.assertIsInstance(parameter, spaxlet.Parameter)
         projected = parameter.constraint(parameter.copy(), 1)
         rows, columns = np.indices(projected.shape, dtype=float)
         self.assertGreater(float(np.sum(projected)), 0)

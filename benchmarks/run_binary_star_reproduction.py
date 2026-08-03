@@ -24,7 +24,7 @@ from pathlib import Path
 import time
 
 import numpy as np
-import scarlet
+import spaxlet
 from astropy.io import fits
 
 
@@ -109,14 +109,14 @@ def _half_up_centers(catalog) -> list[tuple[int, int]]:
 
 def _render_templates(images, kernels, centers):
     channels = [f"ch{index:04d}" for index in range(images.shape[0])]
-    frame = scarlet.Frame(
+    frame = spaxlet.Frame(
         images.shape,
-        psf=scarlet.DeltaPSF(images.shape[0], dtype=images.dtype),
+        psf=spaxlet.DeltaPSF(images.shape[0], dtype=images.dtype),
         channels=channels,
     )
-    observation = scarlet.Observation(
+    observation = spaxlet.Observation(
         images,
-        psf=scarlet.ImagePSF(kernels),
+        psf=spaxlet.ImagePSF(kernels),
         weights=np.ones_like(images),
         channels=channels,
     ).match(frame)

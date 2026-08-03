@@ -1,10 +1,10 @@
-"""Scarlet on the collaborator's two-point-source planet cube.
+"""Spaxlet on the collaborator's two-point-source planet cube.
 
 ``majo_planet_cube.fits`` holds a 5750 K G star and a 1000 K brown dwarf, both
 intrinsic point sources (``MORPHSIG=1e-9``), 16 px apart at a 5000:1 flux ratio.
 Unlike ``morphology_galaxy_cube_004.fits`` it is **noiseless** -- 0 negative
 pixels in 2.25M -- so there is no signal-dependent variance to measure and the
-weights are uniform.  Scarlet's own ``PointSource`` is the matching model, since
+weights are uniform.  Spaxlet's own ``PointSource`` is the matching model, since
 both truth morphologies are the PSF itself.
 
 Two things this driver has to get right, both differing from
@@ -20,7 +20,7 @@ Two things this driver has to get right, both differing from
    PSF centroid, leaves a ~50 percent model residual at short wavelengths that
    shrinks with wavelength as the PSF broadens.  After the roll the 48-pixel
    plane is centred on index 24, which is exactly the ``shape // 2`` convention
-   ``scarlet.ImagePSF`` documents, and the odd crop below keeps it centred.
+   ``spaxlet.ImagePSF`` documents, and the odd crop below keeps it centred.
 
 Products are written in the schema ``plot_recovery_comparison.py`` reads
 (``sed1``/``sed2``, ``morph1``/``morph2``, ``wave``).
@@ -28,7 +28,7 @@ Products are written in the schema ``plot_recovery_comparison.py`` reads
 Run from the repository root::
 
     PYTHONPATH=. venv-scarlet/bin/python -m benchmarks.run_planet_reproduction \
-        --data-root .../jwst/collab --output-dir .../benchmark_artifacts/planet/scarlet
+        --data-root .../jwst/collab --output-dir .../benchmark_artifacts/planet/spaxlet
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ import json
 from pathlib import Path
 
 import numpy as np
-import scarlet
+import spaxlet
 from astropy.io import fits
 
 OVERSAMPLE = 4
@@ -98,17 +98,17 @@ def main() -> None:
     weights = np.ones_like(images)
 
     channels = [f"ch{index:04d}" for index in range(images.shape[0])]
-    frame = scarlet.Frame(images.shape, psf=scarlet.GaussianPSF(sigma=0.3), channels=channels)
-    observation = scarlet.Observation(
-        images, psf=scarlet.ImagePSF(kernels), weights=weights, channels=channels
+    frame = spaxlet.Frame(images.shape, psf=spaxlet.GaussianPSF(sigma=0.3), channels=channels)
+    observation = spaxlet.Observation(
+        images, psf=spaxlet.ImagePSF(kernels), weights=weights, channels=channels
     ).match(frame)
 
-    sources = [scarlet.PointSource(frame, center, observation) for center in catalog]
-    blend = scarlet.Blend(sources, observation)
+    sources = [spaxlet.PointSource(frame, center, observation) for center in catalog]
+    blend = spaxlet.Blend(sources, observation)
     iterations, log_likelihood = blend.fit(args.max_iter, e_rel=args.relative_tolerance)
     print(f"iterations {iterations}  logL {log_likelihood}", flush=True)
 
-    spectra = [np.asarray(scarlet.measure.flux(source), dtype=float) for source in sources]
+    spectra = [np.asarray(spaxlet.measure.flux(source), dtype=float) for source in sources]
     # A PointSource carries a 3D morphology box (1, h, w), unlike the extended
     # sources the galaxy driver handles, so insert in 3D and drop the lead axis.
     morphologies = []
@@ -135,13 +135,13 @@ def main() -> None:
               flush=True)
 
     np.savez_compressed(
-        args.output_dir / "scarlet_planet_recovery.npz",
+        args.output_dir / "spaxlet_planet_recovery.npz",
         sed1=spectra[0], sed2=spectra[1],
         t1=truth[0], t2=truth[1],
         morph1=morphologies[0], morph2=morphologies[1],
         wave=wave, iters=iterations, names=np.array(names),
     )
-    (args.output_dir / "scarlet_planet_report.json").write_text(json.dumps(report, indent=2))
+    (args.output_dir / "spaxlet_planet_report.json").write_text(json.dumps(report, indent=2))
     print(f"wrote products to {args.output_dir}", flush=True)
 
 

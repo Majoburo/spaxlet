@@ -17,7 +17,7 @@ from pathlib import Path
 import time
 
 import numpy as np
-import scarlet
+import spaxlet
 
 from benchmarks.ifu_parity_contracts import (
     CASE_NAMES,
@@ -95,30 +95,30 @@ def _lisasep_morphology_constraint(feature, center):
 def _scarlet_morphology_constraint(feature, center):
     center = tuple(int(coordinate) for coordinate in center)
     if feature == "positivity":
-        return scarlet.PositivityConstraint()
+        return spaxlet.PositivityConstraint()
     if feature == "symmetry":
-        return scarlet.ConstraintChain(
-            scarlet.SymmetryConstraint(center=center),
-            scarlet.PositivityConstraint(),
-            scarlet.CenterOnConstraint(center=center),
+        return spaxlet.ConstraintChain(
+            spaxlet.SymmetryConstraint(center=center),
+            spaxlet.PositivityConstraint(),
+            spaxlet.CenterOnConstraint(center=center),
         )
     if feature == "centroid":
-        return scarlet.DykstraConstraintChain(
-            scarlet.CentroidConstraint(center),
-            scarlet.PositivityConstraint(),
+        return spaxlet.DykstraConstraintChain(
+            spaxlet.CentroidConstraint(center),
+            spaxlet.PositivityConstraint(),
             max_iter=20000,
             rtol=1e-12,
             atol=1e-13,
         )
     if feature.startswith("monotonic-"):
-        return scarlet.ConstraintChain(
-            scarlet.MonotonicityConstraint(
+        return spaxlet.ConstraintChain(
+            spaxlet.MonotonicityConstraint(
                 center=center,
                 neighbor_weight=feature.removeprefix("monotonic-"),
                 min_gradient=0.0,
             ),
-            scarlet.PositivityConstraint(),
-            scarlet.CenterOnConstraint(center=center),
+            spaxlet.PositivityConstraint(),
+            spaxlet.CenterOnConstraint(center=center),
         )
     raise ValueError(f"unknown morphology feature {feature!r}")
 
@@ -176,30 +176,30 @@ def _run_scarlet(
     data = np.asarray(data, dtype=fit_dtype)
     kernels = np.asarray(kernels, dtype=fit_dtype)
     channels = list(range(N_CHANNELS))
-    delta_psf = scarlet.DeltaPSF(N_CHANNELS, dtype=fit_dtype)
-    frame = scarlet.Frame(data.shape, psf=delta_psf, channels=channels)
-    observation = scarlet.Observation(
+    delta_psf = spaxlet.DeltaPSF(N_CHANNELS, dtype=fit_dtype)
+    frame = spaxlet.Frame(data.shape, psf=delta_psf, channels=channels)
+    observation = spaxlet.Observation(
         data,
-        psf=scarlet.ImagePSF(kernels),
+        psf=spaxlet.ImagePSF(kernels),
         weights=np.full_like(data, 1.0 / noise**2),
         channels=channels,
     ).match(frame)
     sources = []
     for start, center in zip(case["starts"], case["centers"]):
-        spectrum = scarlet.TabulatedSpectrum(
+        spectrum = spaxlet.TabulatedSpectrum(
             frame, np.ones(N_CHANNELS, dtype=fit_dtype)
         )
         image = np.asarray(start, dtype=fit_dtype)
         if feature != "positivity":
-            image = scarlet.Parameter(
+            image = spaxlet.Parameter(
                 image,
                 name="image",
-                step=scarlet.parameter.relative_step,
+                step=spaxlet.parameter.relative_step,
                 constraint=_scarlet_morphology_constraint(feature, center),
             )
-        morphology = scarlet.ImageMorphology(frame, image, resizing=False)
-        sources.append(scarlet.FactorizedComponent(frame, spectrum, morphology))
-    blend = scarlet.Blend(sources, observation)
+        morphology = spaxlet.ImageMorphology(frame, image, resizing=False)
+        sources.append(spaxlet.FactorizedComponent(frame, spectrum, morphology))
+    blend = spaxlet.Blend(sources, observation)
     started = time.perf_counter()
     iterations, log_likelihood = blend.fit(
         max_iter,
@@ -300,7 +300,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--lisasep-max-iter", type=int, default=500)
-    parser.add_argument("--scarlet-max-iter", type=int, default=600)
+    parser.add_argument("--spaxlet-max-iter", type=int, default=600)
     parser.add_argument(
         "--case",
         choices=("all",) + CASE_NAMES,
@@ -308,10 +308,10 @@ def main():
         help="run all predeclared cases or one bounded qualification case",
     )
     parser.add_argument(
-        "--scarlet-dtype", choices=("float32", "float64"), default="float64"
+        "--spaxlet-dtype", choices=("float32", "float64"), default="float64"
     )
     parser.add_argument(
-        "--scarlet-scheme",
+        "--spaxlet-scheme",
         choices=("adam", "nadam", "adamx", "amsgrad", "padam", "radam"),
         default="amsgrad",
     )
@@ -352,7 +352,7 @@ def main():
                 ),
             ),
             (
-                "scarlet",
+                "spaxlet",
                 _run_scarlet(
                     case,
                     data,

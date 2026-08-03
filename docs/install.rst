@@ -3,7 +3,7 @@
 Installation
 ============
 
-*scarlet* has several dependencies that must be installed prior to installation:
+*spaxlet* has several dependencies that must be installed prior to installation:
 
 #. numpy_
 #. scipy_
@@ -35,7 +35,7 @@ from github, and build and install it:
     python setup.py install
 
 
-*scarlet* requires the Eigen_ library headers, which are downloaded automatically when using the
+*spaxlet* requires the Eigen_ library headers, which are downloaded automatically when using the
 command above.
 If you already have a local version of Eigen_ and don't want to download the headers, use
 
@@ -62,7 +62,7 @@ If this is the case then before you run the setup script you will need to run:
     xcode-select --install
     sudo installer -pkg /Library/Developer/CommandLineTools/Packages/macOS_SDK_headers_for_macOS_10.14.pkg -target /
 
-Building the Docs (*scarlet* developers only)
+Building the Docs (*spaxlet* developers only)
 ---------------------------------------------
 
 You need to install several extra packages:

@@ -4,32 +4,32 @@ import unittest
 
 import numpy as np
 
-import scarlet
-from scarlet.optimization import spectral_volume_value_gradient
+import spaxlet
+from spaxlet.optimization import spectral_volume_value_gradient
 
 
 def _component(frame, spectrum, morphology, *, fixed_morphology=False, center=None):
     if center is None:
-        constraint = scarlet.PositivityConstraint()
+        constraint = spaxlet.PositivityConstraint()
     else:
-        constraint = scarlet.DykstraConstraintChain(
-            scarlet.CentroidConstraint(center),
-            scarlet.PositivityConstraint(),
+        constraint = spaxlet.DykstraConstraintChain(
+            spaxlet.CentroidConstraint(center),
+            spaxlet.PositivityConstraint(),
             max_iter=10000,
             rtol=1e-12,
             atol=1e-13,
         )
-    image = scarlet.Parameter(
+    image = spaxlet.Parameter(
         np.asarray(morphology, dtype=float),
         name="image",
-        step=scarlet.parameter.relative_step,
+        step=spaxlet.parameter.relative_step,
         constraint=constraint,
         fixed=fixed_morphology,
     )
-    return scarlet.FactorizedComponent(
+    return spaxlet.FactorizedComponent(
         frame,
-        scarlet.TabulatedSpectrum(frame, np.asarray(spectrum, dtype=float)),
-        scarlet.ImageMorphology(frame, image, resizing=False),
+        spaxlet.TabulatedSpectrum(frame, np.asarray(spectrum, dtype=float)),
+        spaxlet.ImageMorphology(frame, image, resizing=False),
     )
 
 
@@ -37,13 +37,13 @@ class VariableProjectionTest(unittest.TestCase):
     def setUp(self):
         self.shape = (5, 7, 7)
         self.channels = tuple(range(self.shape[0]))
-        self.psf = scarlet.DeltaPSF(self.shape[0])
-        self.frame = scarlet.Frame(
+        self.psf = spaxlet.DeltaPSF(self.shape[0])
+        self.frame = spaxlet.Frame(
             self.shape, psf=self.psf, channels=self.channels
         )
 
     def observation(self, data):
-        return scarlet.Observation(
+        return spaxlet.Observation(
             np.asarray(data, dtype=float),
             psf=self.psf,
             weights=np.ones(self.shape),
@@ -72,7 +72,7 @@ class VariableProjectionTest(unittest.TestCase):
                 fixed_morphology=True,
             ),
         ]
-        blend = scarlet.Blend(sources, self.observation(data))
+        blend = spaxlet.Blend(sources, self.observation(data))
 
         blend.fit(1, optimizer="variable_projection", e_rel=0)
 
@@ -107,7 +107,7 @@ class VariableProjectionTest(unittest.TestCase):
             )
             for center in centers
         ]
-        blend = scarlet.Blend(sources, self.observation(data))
+        blend = spaxlet.Blend(sources, self.observation(data))
 
         blend.fit(
             20,
@@ -149,7 +149,7 @@ class VariableProjectionTest(unittest.TestCase):
                     fixed_morphology=True,
                 ),
             ]
-            blend = scarlet.Blend(sources, self.observation(data))
+            blend = spaxlet.Blend(sources, self.observation(data))
             blend.fit(
                 1,
                 optimizer="variable_projection",

@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 from numpy.testing import assert_array_equal, assert_almost_equal
 
-import scarlet
+import spaxlet
 
 
 class TestProjections(object):
@@ -15,7 +15,7 @@ class TestProjections(object):
     """
 
     def test_odd2odd(self):
-        project_image = scarlet.interpolation.project_image
+        project_image = spaxlet.interpolation.project_image
         img = np.arange(35).reshape(5, 7)
 
         # samller to bigger
@@ -60,7 +60,7 @@ class TestProjections(object):
         assert_array_equal(result, truth)
 
     def test_even2even(self):
-        project_image = scarlet.interpolation.project_image
+        project_image = spaxlet.interpolation.project_image
         img = np.arange(48).reshape(8, 6)
 
         # samller to bigger
@@ -105,7 +105,7 @@ class TestProjections(object):
         assert_array_equal(result, truth)
 
     def test_odd2even(self):
-        project_image = scarlet.interpolation.project_image
+        project_image = spaxlet.interpolation.project_image
         img = np.arange(35).reshape(5, 7)
 
         # samller to bigger
@@ -149,7 +149,7 @@ class TestProjections(object):
         assert_array_equal(result, truth)
 
     def test_even2odd(self):
-        project_image = scarlet.interpolation.project_image
+        project_image = spaxlet.interpolation.project_image
         img = np.arange(48).reshape(8, 6)
 
         # samller to bigger
@@ -196,10 +196,10 @@ class TestProjections(object):
     def test_zoom(self):
         # Test that zomming out and in keeps a consistent center
         kernel = np.arange(4).reshape(2, 2) + 1
-        p3 = scarlet.interpolation.project_image(kernel, (3, 3))
-        p6 = scarlet.interpolation.project_image(p3, (6, 6))
-        p5 = scarlet.interpolation.project_image(p6, (5, 5))
-        p2 = scarlet.interpolation.project_image(p3, (2, 2))
+        p3 = spaxlet.interpolation.project_image(kernel, (3, 3))
+        p6 = spaxlet.interpolation.project_image(p3, (6, 6))
+        p5 = spaxlet.interpolation.project_image(p6, (5, 5))
+        p2 = spaxlet.interpolation.project_image(p3, (2, 2))
         assert_array_equal(p2, kernel)
         truth = [[1.0, 2.0, 0.0], [3.0, 4.0, 0.0], [0.0, 0.0, 0.0]]
         assert_array_equal(p3, truth)
@@ -242,9 +242,9 @@ def interpolate_comparison(func, zero_truth, positive_truth, **kwargs):
     assert_array_equal(result[1], truth[1])
 
     with pytest.raises(ValueError):
-        scarlet.interpolation.lanczos(1.1)
+        spaxlet.interpolation.lanczos(1.1)
     with pytest.raises(ValueError):
-        scarlet.interpolation.lanczos(-1.1)
+        spaxlet.interpolation.lanczos(-1.1)
 
 
 class TestConvolutions:
@@ -255,7 +255,7 @@ class TestConvolutions:
         zero_truth = (np.array([1, 0]), np.array([0, 1]))
         positive_truth = (np.array([1 - 0.103, 0.103]), np.array([0, 1]))
         interpolate_comparison(
-            scarlet.interpolation.bilinear, zero_truth, positive_truth
+            spaxlet.interpolation.bilinear, zero_truth, positive_truth
         )
 
     def test_cubic_spline(self):
@@ -265,25 +265,25 @@ class TestConvolutions:
             np.array([-1, 0, 1, 2]),
         )
         interpolate_comparison(
-            scarlet.interpolation.cubic_spline, zero_truth, positive_truth
+            spaxlet.interpolation.cubic_spline, zero_truth, positive_truth
         )
 
     def test_catmull_rom(self):
         # Catmull Rom should be the same as the cubic spline
         # with a=0.5 and b=0
-        zero_truth = scarlet.interpolation.cubic_spline(0, a=0.5)
-        positive_truth = scarlet.interpolation.cubic_spline(0.103, a=0.5)
+        zero_truth = spaxlet.interpolation.cubic_spline(0, a=0.5)
+        positive_truth = spaxlet.interpolation.cubic_spline(0.103, a=0.5)
         interpolate_comparison(
-            scarlet.interpolation.catmull_rom, zero_truth, positive_truth
+            spaxlet.interpolation.catmull_rom, zero_truth, positive_truth
         )
 
     def test_mitchel_netravali(self):
         # Mitchel Netravali should be the same as the cubic spline
         # with a=1/3 and b=1/3
-        zero_truth = scarlet.interpolation.cubic_spline(0, a=1 / 3, b=1 / 3)
-        positive_truth = scarlet.interpolation.cubic_spline(0.103, a=1 / 3, b=1 / 3)
+        zero_truth = spaxlet.interpolation.cubic_spline(0, a=1 / 3, b=1 / 3)
+        positive_truth = spaxlet.interpolation.cubic_spline(0.103, a=1 / 3, b=1 / 3)
         interpolate_comparison(
-            scarlet.interpolation.mitchel_netravali, zero_truth, positive_truth
+            spaxlet.interpolation.mitchel_netravali, zero_truth, positive_truth
         )
 
     def test_lanczos(self):
@@ -303,7 +303,7 @@ class TestConvolutions:
             np.array([-2, -1, 0, 1, 2, 3]),
         )
         interpolate_comparison(
-            scarlet.interpolation.lanczos, zero_truth, positive_truth
+            spaxlet.interpolation.lanczos, zero_truth, positive_truth
         )
 
         # test Lanczos 5
@@ -328,11 +328,11 @@ class TestConvolutions:
             np.array([-4, -3, -2, -1, 0, 1, 2, 3, 4, 5]),
         )
         interpolate_comparison(
-            scarlet.interpolation.lanczos, zero_truth, positive_truth, a=5
+            spaxlet.interpolation.lanczos, zero_truth, positive_truth, a=5
         )
 
     def test_separable(self):
-        result = scarlet.interpolation.get_separable_kernel(0.103, 0.42)
+        result = spaxlet.interpolation.get_separable_kernel(0.103, 0.42)
         truth = [
             [
                 0.000506097,
@@ -387,15 +387,15 @@ class TestConvolutions:
         assert_array_equal(result[1], [-2, -1, 0, 1, 2, 3])
         assert_array_equal(result[2], [-2, -1, 0, 1, 2, 3])
 
-        result = scarlet.interpolation.get_separable_kernel(
-            0.103, -0.42, kernel=scarlet.interpolation.bilinear
+        result = spaxlet.interpolation.get_separable_kernel(
+            0.103, -0.42, kernel=spaxlet.interpolation.bilinear
         )
         truth = [[0.376740000, 0.520260000], [0.043260000, 0.059740000]]
         assert_almost_equal(result[0], truth)
         assert_array_equal(result[1], [0, 1])
         assert_array_equal(result[2], [-1, 0])
 
-        result = scarlet.interpolation.get_separable_kernel(0.103, 0.42, a=5)
+        result = spaxlet.interpolation.get_separable_kernel(0.103, 0.42, a=5)
         truth = [
             [
                 0.0000458,

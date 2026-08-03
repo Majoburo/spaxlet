@@ -19,8 +19,8 @@ import time
 import warnings
 
 import numpy as np
-import scarlet
-from scarlet.optimization import spectral_volume_value_gradient
+import spaxlet
+from spaxlet.optimization import spectral_volume_value_gradient
 from astropy import units as u
 from astropy.io import fits
 
@@ -135,7 +135,7 @@ def _repository_provenance():
         dirty = None
     return {
         "path": str(root),
-        "version": scarlet.__version__,
+        "version": spaxlet.__version__,
         "commit": commit,
         "branch": branch,
         "dirty": dirty,
@@ -147,17 +147,17 @@ def _morphology_parameter(value, feature, center):
     if feature == "positivity":
         return image
     if feature in ("centroid", "centroid_psf"):
-        constraint = scarlet.DykstraConstraintChain(
-            scarlet.CentroidConstraint(center),
-            scarlet.PositivityConstraint(),
+        constraint = spaxlet.DykstraConstraintChain(
+            spaxlet.CentroidConstraint(center),
+            spaxlet.PositivityConstraint(),
             max_iter=20000,
             rtol=1e-12,
             atol=1e-13,
         )
-        return scarlet.Parameter(
+        return spaxlet.Parameter(
             image,
             name="image",
-            step=scarlet.parameter.relative_step,
+            step=spaxlet.parameter.relative_step,
             constraint=constraint,
         )
     raise ValueError("unknown morphology feature {!r}".format(feature))
@@ -195,8 +195,8 @@ def main():
         raise ValueError("PSF and science cube must share the spectral grid")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        kernels, retained_flux = scarlet.crop_psf_kernels(kernels, args.kernel_size)
-    kernels, removed_shift = scarlet.recenter_psf_kernels(kernels)
+        kernels, retained_flux = spaxlet.crop_psf_kernels(kernels, args.kernel_size)
+    kernels, removed_shift = spaxlet.recenter_psf_kernels(kernels)
     kernels = np.asarray(kernels, dtype=fit_dtype)
     morphology_reference_offset = np.median(removed_shift, axis=0)
     centroid_offset = (
@@ -226,18 +226,18 @@ def main():
     )
     physical_wavelengths = wavelength * u.um
     channels = ["ch{:04d}".format(index) for index in range(data.shape[0])]
-    delta_psf = scarlet.DeltaPSF(data.shape[0], dtype=fit_dtype)
-    frame = scarlet.Frame(
+    delta_psf = spaxlet.DeltaPSF(data.shape[0], dtype=fit_dtype)
+    frame = spaxlet.Frame(
         data.shape,
         psf=delta_psf,
         channels=channels,
         wavelengths=physical_wavelengths,
     )
-    observation = scarlet.Observation.from_ifu_arrays(
+    observation = spaxlet.Observation.from_ifu_arrays(
         data,
         physical_wavelengths,
         variance,
-        psf=scarlet.ImagePSF(kernels),
+        psf=spaxlet.ImagePSF(kernels),
         channels=channels,
         dtype=fit_dtype,
     ).match(frame)
@@ -255,25 +255,25 @@ def main():
     ]
     sources = []
     for morphology_start, center in zip(starting_morphologies, fit_centers):
-        spectrum = scarlet.TabulatedSpectrum(
+        spectrum = spaxlet.TabulatedSpectrum(
             frame, np.ones(data.shape[0], dtype=fit_dtype)
         )
-        morphology = scarlet.ImageMorphology(
+        morphology = spaxlet.ImageMorphology(
             frame,
             _morphology_parameter(morphology_start, args.feature, center),
             resizing=False,
         )
-        sources.append(scarlet.FactorizedComponent(frame, spectrum, morphology))
+        sources.append(spaxlet.FactorizedComponent(frame, spectrum, morphology))
     _memory_checkpoint("sources", args.profile_memory)
 
     initial_model = np.asarray(
-        observation.render(scarlet.Blend(sources, observation).get_model()),
+        observation.render(spaxlet.Blend(sources, observation).get_model()),
         dtype=float,
     )
     initial_chi_square = float(np.mean((data - initial_model) ** 2 / variance))
     del initial_model
     _memory_checkpoint("initial_model", args.profile_memory)
-    blend = scarlet.Blend(sources, observation)
+    blend = spaxlet.Blend(sources, observation)
     optimality_checks = []
     periodic_optimality_runtime = 0.0
 
@@ -358,8 +358,8 @@ def main():
     spectra = [spectra[index] for index in order]
     morphologies = [morphologies[index] for index in order]
     ordered_sources = [sources[index] for index in order]
-    mixing_intervals = scarlet.bilinear_mixing_intervals(ordered_sources)
-    mixing_envelopes = scarlet.pairwise_mixing_envelopes(ordered_sources)
+    mixing_intervals = spaxlet.bilinear_mixing_intervals(ordered_sources)
+    mixing_envelopes = spaxlet.pairwise_mixing_envelopes(ordered_sources)
 
     model = np.asarray(observation.render(blend.get_model()), dtype=float)
     residual = data - model
@@ -401,7 +401,7 @@ def main():
         else float("nan")
     )
     report = {
-        "scarlet": _repository_provenance(),
+        "spaxlet": _repository_provenance(),
         "feature": args.feature,
         "constraint_centers_yx": (
             [list(center) for center in fit_centers]
@@ -514,7 +514,7 @@ def main():
             ],
         },
     }
-    output = args.output_dir / "scarlet_matched_start{}.npz".format(args.start)
+    output = args.output_dir / "spaxlet_matched_start{}.npz".format(args.start)
     np.savez_compressed(
         output,
         sed1=spectra[0],
@@ -546,7 +546,7 @@ def main():
         structural_morph2_lower=mixing_envelopes[1].morphology_lower,
         structural_morph2_upper=mixing_envelopes[1].morphology_upper,
     )
-    (args.output_dir / "scarlet_matched_metrics.json").write_text(
+    (args.output_dir / "spaxlet_matched_metrics.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n"
     )
     print(

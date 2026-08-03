@@ -3,7 +3,12 @@
 [![DOI](https://img.shields.io/badge/DOI-10.1016%2Fj.ascom.2018.07.001-blue.svg)](https://doi.org/10.1016/j.ascom.2018.07.001)
 [![arXiv](https://img.shields.io/badge/arxiv-1802.10157-red.svg)](https://arxiv.org/abs/1802.10157)
 
-# Scarlet
+# spaxlet
+
+`spaxlet` is a fork of [scarlet](https://github.com/pmelchior/scarlet) (the
+Python package is now importable as `spaxlet`), extended with IFU
+("spaxel"-based) parity work under `spaxlet/ifu.py` and `docs/lisasep_ifu_port.md`.
+All badges and links below point to the upstream project this fork is based on.
 
 This package performs source separation (aka "deblending") on multi-band images. It's geared towards optical astronomy, where scenes are composed of stars and galaxies, but it is straightforward to apply it to other imaging data.
 

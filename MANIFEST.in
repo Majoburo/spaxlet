@@ -1,2 +1,2 @@
 include _version.txt
-include scarlet/testing/lookup.db
+include spaxlet/testing/lookup.db

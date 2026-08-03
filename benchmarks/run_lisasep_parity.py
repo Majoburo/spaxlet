@@ -37,10 +37,10 @@ def main():
         help="skip the slower six-channel end-to-end matrix",
     )
     parser.add_argument("--lisasep-max-iter", type=int, default=500)
-    parser.add_argument("--scarlet-max-iter", type=int, default=600)
+    parser.add_argument("--spaxlet-max-iter", type=int, default=600)
     args = parser.parse_args()
 
-    scarlet = Path(__file__).resolve().parents[1]
+    spaxlet = Path(__file__).resolve().parents[1]
     lisasep = args.lisasep.resolve()
     operator_script = (
         lisasep / "examples/benchmark_twogalaxy/compare_constraint_operators.py"
@@ -52,14 +52,14 @@ def main():
         if not path.is_file():
             parser.error("missing lisasep comparison script: {}".format(path))
 
-    scarlet_base = _git(scarlet, "merge-base", "HEAD", SCARLET_BASE)
+    scarlet_base = _git(spaxlet, "merge-base", "HEAD", SCARLET_BASE)
     if scarlet_base != SCARLET_BASE:
         parser.error("Scarlet branch does not descend from {}".format(SCARLET_BASE))
     lisasep_head = _git(lisasep, "rev-parse", "HEAD")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     environment = os.environ.copy()
-    python_path = [str(scarlet), str(lisasep / "src")]
+    python_path = [str(spaxlet), str(lisasep / "src")]
     if environment.get("PYTHONPATH"):
         python_path.append(environment["PYTHONPATH"])
     environment["PYTHONPATH"] = os.pathsep.join(python_path)
@@ -88,7 +88,7 @@ def main():
                 str(args.output_dir / "deblend_features.json"),
                 "--lisasep-max-iter",
                 str(args.lisasep_max_iter),
-                "--scarlet-max-iter",
+                "--spaxlet-max-iter",
                 str(args.scarlet_max_iter),
             ],
             environment,

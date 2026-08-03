@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=scarlet-match
+#SBATCH --job-name=spaxlet-match
 #SBATCH --account=nbody
 #SBATCH --partition=batch
 #SBATCH --array=0-2
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=06:00:00
-#SBATCH --output=/panfs/accrepfs.vampire/home/bustam1/lisastack_a6000/lisasep/scarlet_matched_reproduction_%A_%a.log
+#SBATCH --output=/panfs/accrepfs.vampire/home/bustam1/lisastack_a6000/lisasep/spaxlet_matched_reproduction_%A_%a.log
 
 set -euo pipefail
 
@@ -14,8 +14,8 @@ scarlet_root=/panfs/accrepfs.vampire/home/bustam1/lisastack_a6000/scarlet-lisase
 lisasep_root=/panfs/accrepfs.vampire/home/bustam1/lisastack_a6000/lisasep
 cd "${scarlet_root}"
 export PYTHONPATH="${scarlet_root}"
-export MPLCONFIGDIR=/tmp/scarlet-match-mpl-"${SLURM_ARRAY_JOB_ID}"-"${SLURM_ARRAY_TASK_ID}"
-export XDG_CACHE_HOME=/tmp/scarlet-match-cache-"${SLURM_ARRAY_JOB_ID}"-"${SLURM_ARRAY_TASK_ID}"
+export MPLCONFIGDIR=/tmp/spaxlet-match-mpl-"${SLURM_ARRAY_JOB_ID}"-"${SLURM_ARRAY_TASK_ID}"
+export XDG_CACHE_HOME=/tmp/spaxlet-match-cache-"${SLURM_ARRAY_JOB_ID}"-"${SLURM_ARRAY_TASK_ID}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export OPENBLAS_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 
@@ -33,7 +33,7 @@ spectral_tolerance="${SCARLET_SPECTRAL_TOLERANCE:-1e-8}"
 feature="${SCARLET_FEATURE:-centroid_psf}"
 optimality_tolerance="${SCARLET_OPTIMALITY_TOLERANCE:-1e-4}"
 optimality_check_interval="${SCARLET_OPTIMALITY_CHECK_INTERVAL:-20}"
-output_dir="${lisasep_root}/benchmark_artifacts/collaborator_blend_comparison/scarlet_${run_label}_start${start}"
+output_dir="${lisasep_root}/benchmark_artifacts/collaborator_blend_comparison/spaxlet_${run_label}_start${start}"
 
 /nobackup/user/bustam1/lisastack_a6000/jwst/venv-scarlet/bin/python \
   -m benchmarks.run_collaborator_reproduction \

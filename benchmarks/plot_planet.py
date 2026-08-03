@@ -132,7 +132,7 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     default_report = (
         "planet_noise_report.json" if "noise" in args.product.name
-        else "scarlet_planet_report.json"
+        else "spaxlet_planet_report.json"
     )
     report_path = args.report or args.product.with_name(default_report)
     report = json.loads(report_path.read_text()) if report_path.exists() else {}

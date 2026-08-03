@@ -1,5 +1,5 @@
 import pytest
-from scarlet.testing import api
+from spaxlet.testing import api
 
 
 @pytest.mark.usefixtures("branch")

@@ -2,37 +2,37 @@ import numpy as np
 from autograd import grad
 from numpy.testing import assert_array_equal, assert_almost_equal
 from functools import partial
-import scarlet
+import spaxlet
 
 
 class TestObservation(object):
     def get_psfs(self, sigmas, boxsize):
-        psf = scarlet.GaussianPSF(sigmas, boxsize=boxsize)
+        psf = spaxlet.GaussianPSF(sigmas, boxsize=boxsize)
         return psf
 
     def test_render_loss(self):
         # model frame with minimal PSF
         shape0 = (3, 13, 13)
         s0 = 0.9
-        model_psf = scarlet.GaussianPSF(s0, boxsize=shape0[1])
+        model_psf = spaxlet.GaussianPSF(s0, boxsize=shape0[1])
         model_psf_image = model_psf.get_model()
 
         shape = (3, 43, 43)
         channels = np.arange(shape[0])
-        model_frame = scarlet.Frame(shape, psf=model_psf, channels=channels)
+        model_frame = spaxlet.Frame(shape, psf=model_psf, channels=channels)
 
         # insert point source manually into center for model
         origin = (0, shape[1] // 2 - shape0[1] // 2, shape[2] // 2 - shape0[2] // 2)
-        bbox = scarlet.Box(shape0, origin=origin)
+        bbox = spaxlet.Box(shape0, origin=origin)
         model = np.zeros(shape)
         box = np.stack([model_psf_image[0] for c in range(shape[0])], axis=0)
         bbox.insert_into(model, box)
 
         # generate observation with wider PSFs
-        psf = scarlet.GaussianPSF([2.1, 1.1, 3.5], boxsize=shape[1])
+        psf = spaxlet.GaussianPSF([2.1, 1.1, 3.5], boxsize=shape[1])
         psf_image = psf.get_model()
         images = np.ones(shape)
-        observation = scarlet.Observation(images, psf=psf, channels=channels)
+        observation = spaxlet.Observation(images, psf=psf, channels=channels)
         observation.match(model_frame)
         model_ = observation.render(model)
         assert_almost_equal(model_, psf_image)
@@ -50,13 +50,13 @@ class TestObservation(object):
     def test_delta_model_psf_applies_observation_kernel_directly(self):
         channels = np.arange(3)
         shape = (3, 31, 29)
-        model_frame = scarlet.Frame(
-            shape, psf=scarlet.DeltaPSF(len(channels)), channels=channels
+        model_frame = spaxlet.Frame(
+            shape, psf=spaxlet.DeltaPSF(len(channels)), channels=channels
         )
-        observation_psf = scarlet.GaussianPSF(
+        observation_psf = spaxlet.GaussianPSF(
             [0.8, 1.2, 1.7], boxsize=11
         )
-        observation = scarlet.Observation(
+        observation = spaxlet.Observation(
             np.zeros(shape), psf=observation_psf, channels=channels
         ).match(model_frame)
         model = np.zeros(shape)
@@ -72,7 +72,7 @@ class TestObservation(object):
     def test_delta_psf_validates_channel_count(self):
         for invalid in (0, -1, 1.5):
             try:
-                scarlet.DeltaPSF(invalid)
+                spaxlet.DeltaPSF(invalid)
             except ValueError:
                 pass
             else:
@@ -82,15 +82,15 @@ class TestObservation(object):
         rng = np.random.RandomState(13)
         shape = (7, 17, 15)
         channels = np.arange(shape[0])
-        model_frame = scarlet.Frame(
+        model_frame = spaxlet.Frame(
             shape,
-            psf=scarlet.DeltaPSF(shape[0], dtype=np.float32),
+            psf=spaxlet.DeltaPSF(shape[0], dtype=np.float32),
             channels=channels,
             dtype=np.float32,
         )
-        observation = scarlet.Observation(
+        observation = spaxlet.Observation(
             rng.normal(size=shape).astype(np.float32),
-            psf=scarlet.GaussianPSF(
+            psf=spaxlet.GaussianPSF(
                 np.linspace(0.7, 1.6, shape[0]), boxsize=9
             ),
             weights=rng.uniform(0.2, 1.5, size=shape).astype(np.float32),
@@ -118,12 +118,12 @@ class TestObservation(object):
         rng = np.random.RandomState(21)
         shape = (3, 9, 9)
         channels = np.arange(shape[0])
-        psf = scarlet.DeltaPSF(shape[0])
-        frame = scarlet.Frame(shape, psf=psf, channels=channels)
+        psf = spaxlet.DeltaPSF(shape[0])
+        frame = spaxlet.Frame(shape, psf=psf, channels=channels)
         truth_spectrum = np.asarray([0.7, 1.1, 1.6])
         truth_morphology = rng.uniform(0.2, 1.0, size=shape[1:])
         data = truth_spectrum[:, None, None] * truth_morphology[None]
-        observation = scarlet.Observation(
+        observation = spaxlet.Observation(
             data,
             psf=psf,
             weights=np.full(shape, 4.0),
@@ -131,14 +131,14 @@ class TestObservation(object):
         ).match(frame)
 
         def make_blend(spectrum, morphology):
-            source = scarlet.FactorizedComponent(
+            source = spaxlet.FactorizedComponent(
                 frame,
-                scarlet.TabulatedSpectrum(frame, np.asarray(spectrum)),
-                scarlet.ImageMorphology(
+                spaxlet.TabulatedSpectrum(frame, np.asarray(spectrum)),
+                spaxlet.ImageMorphology(
                     frame, np.asarray(morphology), resizing=False
                 ),
             )
-            return scarlet.Blend([source], observation)
+            return spaxlet.Blend([source], observation)
 
         stationary = make_blend(truth_spectrum, truth_morphology)
         stationary_residual = (
@@ -169,13 +169,13 @@ class TestObservation(object):
         rng = np.random.RandomState(31)
         shape = (3, 9, 9)
         channels = np.arange(shape[0])
-        psf = scarlet.DeltaPSF(shape[0])
-        frame = scarlet.Frame(shape, psf=psf, channels=channels)
+        psf = spaxlet.DeltaPSF(shape[0])
+        frame = spaxlet.Frame(shape, psf=psf, channels=channels)
         spectrum = np.asarray([0.7, 1.1, 1.6])
         morphology = rng.uniform(0.2, 1.0, size=shape[1:])
         morphology /= morphology.sum()
         data = spectrum[:, None, None] * morphology[None]
-        observation = scarlet.Observation(
+        observation = spaxlet.Observation(
             data,
             psf=psf,
             weights=np.full(shape, 4.0),
@@ -183,14 +183,14 @@ class TestObservation(object):
         ).match(frame)
 
         def fitted(scale):
-            source = scarlet.FactorizedComponent(
+            source = spaxlet.FactorizedComponent(
                 frame,
-                scarlet.TabulatedSpectrum(frame, spectrum / scale),
-                scarlet.ImageMorphology(
+                spaxlet.TabulatedSpectrum(frame, spectrum / scale),
+                spaxlet.ImageMorphology(
                     frame, morphology * scale, resizing=False
                 ),
             )
-            blend = scarlet.Blend([source], observation)
+            blend = spaxlet.Blend([source], observation)
             blend.fit(
                 3,
                 e_rel=0,

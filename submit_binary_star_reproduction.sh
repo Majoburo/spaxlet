@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=scarlet-binary
+#SBATCH --job-name=spaxlet-binary
 #SBATCH --account=nbody
 #SBATCH --partition=batch
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
 #SBATCH --time=01:00:00
-#SBATCH --output=/panfs/accrepfs.vampire/home/bustam1/lisastack_a6000/scarlet-lisasep/benchmark_artifacts/binary_star/scarlet_binary_%j.log
+#SBATCH --output=/panfs/accrepfs.vampire/home/bustam1/lisastack_a6000/scarlet-lisasep/benchmark_artifacts/binary_star/spaxlet_binary_%j.log
 
 set -euo pipefail
 
@@ -17,8 +17,8 @@ python=/nobackup/user/bustam1/lisastack_a6000/jwst/venv-scarlet/bin/python
 
 cd "${scarlet_root}"
 export PYTHONPATH="${scarlet_root}"
-export MPLCONFIGDIR=/tmp/scarlet-binary-mpl-"${SLURM_JOB_ID}"
-export XDG_CACHE_HOME=/tmp/scarlet-binary-cache-"${SLURM_JOB_ID}"
+export MPLCONFIGDIR=/tmp/spaxlet-binary-mpl-"${SLURM_JOB_ID}"
+export XDG_CACHE_HOME=/tmp/spaxlet-binary-cache-"${SLURM_JOB_ID}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export OPENBLAS_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 
