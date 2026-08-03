@@ -24,7 +24,12 @@ from scarlet.optimization import spectral_volume_value_gradient
 from astropy import units as u
 from astropy.io import fits
 
-from benchmarks.ifu_parity_metrics import morphology_metrics, residual_metrics, spectral_metrics
+from benchmarks.ifu_parity_metrics import (
+    morphology_metrics,
+    residual_metrics,
+    spectral_metrics,
+    translate_morphology,
+)
 
 
 READ_VARIANCE = 0.000880653
@@ -72,15 +77,15 @@ def _centroid(value):
     return np.asarray([np.sum(rows * value), np.sum(columns * value)])
 
 
-def _catalog_order(morphologies):
+def _catalog_order(morphologies, reference_centers=CATALOG_CENTERS):
     centers = [_centroid(value) for value in morphologies]
     direct = sum(
         np.linalg.norm(center - catalog)
-        for center, catalog in zip(centers, CATALOG_CENTERS)
+        for center, catalog in zip(centers, reference_centers)
     )
     swapped = sum(
         np.linalg.norm(center - catalog)
-        for center, catalog in zip(centers[::-1], CATALOG_CENTERS)
+        for center, catalog in zip(centers[::-1], reference_centers)
     )
     return (1, 0) if swapped < direct else (0, 1)
 
@@ -193,14 +198,25 @@ def main():
         kernels, retained_flux = scarlet.crop_psf_kernels(kernels, args.kernel_size)
     kernels, removed_shift = scarlet.recenter_psf_kernels(kernels)
     kernels = np.asarray(kernels, dtype=fit_dtype)
+    morphology_reference_offset = np.median(removed_shift, axis=0)
     centroid_offset = (
-        np.median(removed_shift, axis=0)
+        morphology_reference_offset
         if args.feature == "centroid_psf"
         else np.zeros(2)
     )
     fit_centers = tuple(
         tuple(np.asarray(center, dtype=float) + centroid_offset)
         for center in CATALOG_CENTERS
+    )
+    catalog_reference_centers = tuple(
+        tuple(np.asarray(center, dtype=float) + morphology_reference_offset)
+        for center in CATALOG_CENTERS
+    )
+    reference_morphologies = np.asarray(
+        [
+            translate_morphology(morphology, morphology_reference_offset)
+            for morphology in reference_morphologies
+        ]
     )
     _memory_checkpoint("corrected_psf", args.profile_memory)
 
@@ -338,7 +354,7 @@ def main():
         scale = float(morphology.sum())
         spectra.append(np.asarray(source.spectrum.get_model(), dtype=float) * scale)
         morphologies.append(morphology / scale)
-    order = _catalog_order(morphologies)
+    order = _catalog_order(morphologies, catalog_reference_centers)
     spectra = [spectra[index] for index in order]
     morphologies = [morphologies[index] for index in order]
     ordered_sources = [sources[index] for index in order]
@@ -398,9 +414,16 @@ def main():
             else "catalog"
         ),
         "centroid_offset_yx": centroid_offset.tolist(),
+        "morphology_reference_coordinate_frame": (
+            "truth_translated_to_recentered_psf_latent_frame"
+        ),
+        "morphology_reference_offset_yx": morphology_reference_offset.tolist(),
         "start": args.start,
         "start_scales": list(scales),
         "catalog_order": list(order),
+        "catalog_reference_centers_yx": [
+            list(center) for center in catalog_reference_centers
+        ],
         "runtime_seconds": runtime,
         "iterations": int(iterations),
         "max_iter": args.max_iter,
@@ -510,6 +533,7 @@ def main():
         feature=np.asarray(args.feature),
         constraint_centers_yx=np.asarray(fit_centers),
         centroid_offset_yx=centroid_offset,
+        morphology_reference_offset_yx=morphology_reference_offset,
         optimizer=np.asarray(args.optimizer),
         minimum_volume_strength=args.minimum_volume_strength,
         kernel_size=args.kernel_size,

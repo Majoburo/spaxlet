@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from astropy.io import fits
 
+from benchmarks.ifu_parity_metrics import morphology_metrics, translate_morphology
+
 
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -74,6 +76,23 @@ def _load(args):
     np.testing.assert_allclose(wavelength, truth_wavelength, rtol=0, atol=1e-10)
     if len(report["sources"]) != 2:
         raise ValueError("collaborator report must contain exactly two sources")
+    morphology_reference_offset = np.asarray(
+        report.get(
+            "morphology_reference_offset_yx",
+            report.get("removed_shift_median_px", (0.0, 0.0)),
+        ),
+        dtype=float,
+    )
+    truth_morphologies = np.asarray(
+        [
+            translate_morphology(morphology, morphology_reference_offset)
+            for morphology in truth_morphologies
+        ]
+    )
+    morphology_scores = tuple(
+        morphology_metrics(value, reference)
+        for value, reference in zip(morphologies, truth_morphologies)
+    )
     return {
         "report": report,
         "wavelength": wavelength,
@@ -83,6 +102,7 @@ def _load(args):
         "spectral_envelopes": spectral_envelopes,
         "truth_spectra": truth_spectra,
         "truth_morphologies": truth_morphologies,
+        "morphology_scores": morphology_scores,
     }
 
 
@@ -156,7 +176,7 @@ def _plot_morphologies(values, output, dpi):
             vmin=-limit,
             vmax=limit,
         )
-        score = values["report"]["sources"][source]["morphology"]
+        score = values["morphology_scores"][source]
         axes[source, 0].set_ylabel("Galaxy {}".format(source + 1))
         axes[source, 1].set_title(
             "rel-L2 {:.2f}%, centroid {:.3f}px".format(
@@ -172,7 +192,7 @@ def _plot_morphologies(values, output, dpi):
         for axis in axes[source]:
             axis.set_xticks([])
             axis.set_yticks([])
-    axes[0, 0].set_title("truth (unit flux, sqrt stretch)")
+    axes[0, 0].set_title("truth in latent PSF frame")
     axes[0, 2].set_title("unit-flux residual")
     figure.savefig(output, dpi=dpi)
     plt.close(figure)

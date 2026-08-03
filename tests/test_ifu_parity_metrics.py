@@ -5,11 +5,13 @@ import unittest
 import numpy as np
 
 from benchmarks.ifu_parity_metrics import (
+    centroid,
     morphology_metrics,
     normalized_morphology,
     residual_metrics,
     spectral_metrics,
     start_sensitivity,
+    translate_morphology,
 )
 
 
@@ -43,6 +45,23 @@ class IFUParityMetrics(unittest.TestCase):
         invalid[0, 0] = -1.0
         with self.assertRaises(ValueError):
             normalized_morphology(invalid)
+
+    def test_translate_morphology_uses_declared_subpixel_offset(self):
+        truth = np.zeros((7, 9))
+        truth[3, 4] = 1.0
+        translated = translate_morphology(truth, (0.25, -0.5))
+        self.assertAlmostEqual(float(np.sum(translated)), 1.0)
+        np.testing.assert_allclose(centroid(translated), (3.25, 3.5))
+        expected = np.zeros_like(truth)
+        expected[3, 3] = 0.375
+        expected[3, 4] = 0.375
+        expected[4, 3] = 0.125
+        expected[4, 4] = 0.125
+        np.testing.assert_allclose(translated, expected)
+
+    def test_translate_morphology_validates_offset(self):
+        with self.assertRaises(ValueError):
+            translate_morphology(np.ones((3, 3)), (1.0,))
 
     def test_residual_metrics_apply_weights_and_mask(self):
         residual = np.ones((2, 5, 7))

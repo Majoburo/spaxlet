@@ -57,6 +57,53 @@ def centroid(value):
     return np.asarray([np.sum(rows * value), np.sum(columns * value)])
 
 
+def translate_morphology(value, offset_yx):
+    """Translate a morphology with bilinear sampling and zero boundaries.
+
+    This expresses injected morphologies in the latent coordinate frame after
+    an off-center instrumental PSF has been recentered. It is a coordinate
+    conversion for truth scoring, not registration fitted from the recovery.
+    """
+
+    value = np.asarray(value, dtype=float)
+    offset = np.asarray(offset_yx, dtype=float)
+    if value.ndim != 2 or not np.all(np.isfinite(value)):
+        raise ValueError("morphology must be a finite two-dimensional array")
+    if offset.shape != (2,) or not np.all(np.isfinite(offset)):
+        raise ValueError("morphology offset must contain two finite coordinates")
+
+    rows, columns = np.indices(value.shape, dtype=float)
+    source_rows = rows - offset[0]
+    source_columns = columns - offset[1]
+    row0 = np.floor(source_rows).astype(int)
+    column0 = np.floor(source_columns).astype(int)
+    row_fraction = source_rows - row0
+    column_fraction = source_columns - column0
+    translated = np.zeros_like(value)
+    for delta_row, row_weight in (
+        (0, 1.0 - row_fraction),
+        (1, row_fraction),
+    ):
+        for delta_column, column_weight in (
+            (0, 1.0 - column_fraction),
+            (1, column_fraction),
+        ):
+            source_row = row0 + delta_row
+            source_column = column0 + delta_column
+            valid = (
+                (source_row >= 0)
+                & (source_row < value.shape[0])
+                & (source_column >= 0)
+                & (source_column < value.shape[1])
+            )
+            translated[valid] += (
+                row_weight[valid]
+                * column_weight[valid]
+                * value[source_row[valid], source_column[valid]]
+            )
+    return translated
+
+
 def _gaussian_smooth(value, sigma):
     if not np.isfinite(sigma) or sigma <= 0:
         raise ValueError("smoothing scales must be positive and finite")

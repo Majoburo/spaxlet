@@ -5,7 +5,10 @@ import unittest
 import numpy as np
 
 import scarlet
-from benchmarks.run_collaborator_reproduction import _morphology_parameter
+from benchmarks.run_collaborator_reproduction import (
+    _catalog_order,
+    _morphology_parameter,
+)
 
 
 class IFUCollaboratorFeatureTest(unittest.TestCase):
@@ -46,6 +49,21 @@ class IFUCollaboratorFeatureTest(unittest.TestCase):
     def test_unknown_feature_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "unknown morphology feature"):
             _morphology_parameter(np.ones((3, 3)), "volume", (1, 1))
+
+    def test_catalog_order_uses_centers_in_the_latent_psf_frame(self):
+        first = np.zeros((9, 11))
+        second = np.zeros_like(first)
+        first[3, 8] = 1
+        second[7, 2] = 1
+        reference_centers = ((3.0, 8.0), (7.0, 2.0))
+        self.assertEqual(
+            _catalog_order((first, second), reference_centers),
+            (0, 1),
+        )
+        self.assertEqual(
+            _catalog_order((second, first), reference_centers),
+            (1, 0),
+        )
 
 
 if __name__ == "__main__":
