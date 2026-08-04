@@ -39,6 +39,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--report", type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--dpi", type=int, default=180)
+    parser.add_argument(
+        "--filename",
+        default="planet_spectra.png",
+        help="output filename for a noiseless reproduction product",
+    )
     return parser
 
 
@@ -50,7 +55,7 @@ def _fractional(value: np.ndarray, truth: np.ndarray) -> np.ndarray:
     return result
 
 
-def _plot_reproduction(product, report, output_dir, dpi):
+def _plot_reproduction(product, report, output_dir, dpi, filename="planet_spectra.png"):
     wave = np.asarray(product["wave"], float)
     names = [str(name) for name in product["names"]]
     spectra = [np.asarray(product["sed1"], float), np.asarray(product["sed2"], float)]
@@ -75,7 +80,7 @@ def _plot_reproduction(product, report, output_dir, dpi):
         span = np.nanpercentile(np.abs(fractional), 99.5)
         axes[1, source].set(xlabel="wavelength (um)", ylabel="fractional error (%)",
                             ylim=(-1.5 * span, 1.5 * span))
-    figure.savefig(output_dir / "planet_spectra.png", dpi=dpi)
+    figure.savefig(output_dir / filename, dpi=dpi)
     plt.close(figure)
     return 1
 
@@ -134,7 +139,10 @@ def main() -> None:
 
     with np.load(args.product, allow_pickle=False) as product:
         plot = _plot_noise if "gls" in product else _plot_reproduction
-        written = plot(product, report, args.output_dir, args.dpi)
+        if plot is _plot_reproduction:
+            written = plot(product, report, args.output_dir, args.dpi, args.filename)
+        else:
+            written = plot(product, report, args.output_dir, args.dpi)
     print(f"wrote {written} figure to {args.output_dir}")
 
 
