@@ -9,9 +9,11 @@ from benchmarks.run_spt0311_deblend import (
     PUBLISHED_OFFSETS_ARCSEC,
     catalog_centers_yx,
     morphology_parameter,
+    parse_source_groups,
     selected_channel_indices,
     source_box_size,
     source_constraint_name,
+    source_group_box_size,
     source_morphology_box,
 )
 
@@ -68,6 +70,19 @@ class SPT0311BenchmarkTest(unittest.TestCase):
         self.assertEqual(source_box_size("C1", padding=2), 15)
         with self.assertRaises(ValueError):
             source_box_size("C1", padding=-1)
+
+    def test_merged_source_factor_uses_combined_support(self):
+        groups = parse_source_groups("lens+W,E+L7,C1", "g395h")
+        self.assertEqual(groups["lens+W"], ("lens", "W"))
+        centers = {"E": np.asarray((10.0, 10.0)), "L7": np.asarray((11.0, 9.0))}
+        self.assertEqual(
+            source_group_box_size(
+                ("E", "L7"), centers, np.asarray((10.5, 9.5))
+            ),
+            19,
+        )
+        with self.assertRaisesRegex(ValueError, "more than one factor"):
+            parse_source_groups("E+L7,L7", "g395h")
 
     def test_hybrid_constraint_selection_is_explicit(self):
         self.assertEqual(source_constraint_name("lens", "hybrid"), "symmetry")

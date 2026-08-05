@@ -290,6 +290,34 @@ python benchmarks/run_spt0311_deblend.py \
 Use `--support-padding 2` only as a comparison arm; zero is the benchmark
 default and was favored by the broad-cube pilots.
 
+### Grouped-factor diagnostics
+
+The runner accepts `+`-joined catalog names in `--sources`, for example
+`--sources 'lens,lz1+L5,lz2,...'`. Such a token fits one rank-one factor over
+the smallest odd square containing the standard supports of all members. The
+group uses positivity without an exact centroid because the catalog does not
+specify the members' relative fluxes. The JSON report records the expanded
+`source_groups` mapping and actual combined support. This is a model-selection
+diagnostic, not evidence that grouped catalog entries are one physical galaxy.
+
+This distinction matters for the crowded `lz1`/`L5` region. Arribas et al.
+classify `lz1` as a foreground galaxy at z=2.576 and `L5` as a z=6.90940 line
+emitter. The separate-factor public-cube arm contains the expected [O III]
+doublet in the `L5` spectrum, at 3.923 and 3.961 um, but also assigns the same
+lines to `lz1`; their fitted spectral cosine is 0.647. On the complete
+2.87--5.27 um G395H cube, which retains redshifted H-alpha near 5.19 um,
+separate and grouped 30-iteration arms give `chi2/N = 1.231236` and `1.231351`,
+respectively. The small likelihood difference is not decisive after accounting
+for an entire extra 3,610-channel spectrum. Moreover, the grouped morphology
+centroid moves away from both catalog positions, showing that its broad support
+is absorbing unrelated structure. The MAST G395H cube therefore supports
+localized high-redshift line emission but does not by itself establish the
+paper's stronger separate-galaxy interpretation; that classification also uses
+shorter-wavelength R100 features absent from G395H. Source-level products keep
+`L5` and the three `lz` objects separate while marking their attribution as
+unresolved; a merged factor may only be labeled and used as a nuisance
+component.
+
 ## Spectral smoothness arm
 
 `SpectralSmoothnessConstraint` is a reusable one-dimensional proximal penalty

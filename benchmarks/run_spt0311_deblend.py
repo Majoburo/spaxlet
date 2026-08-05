@@ -90,7 +90,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", required=True, choices=("prism", "g395h"))
     parser.add_argument(
         "--sources",
-        help="comma-separated source names; defaults to the published catalog",
+        help=(
+            "comma-separated source factors; join catalog names with '+' to fit "
+            "one factor over their combined support"
+        ),
     )
     parser.add_argument("--wavelength-min", type=float, help="microns")
     parser.add_argument("--wavelength-max", type=float, help="microns")
@@ -346,9 +349,71 @@ def source_box_size(source_name, padding=0):
     return base + 2 * padding
 
 
+def parse_source_groups(selection, mode):
+    """Parse source factors, allowing ``E+L7``-style merged components."""
+
+    tokens = (
+        tuple(token.strip() for token in selection.split(",") if token.strip())
+        if selection
+        else DEFAULT_SOURCE_NAMES[mode]
+    )
+    if not tokens:
+        raise ValueError("at least one source must be selected")
+    groups = OrderedDict()
+    used = set()
+    for token in tokens:
+        members = tuple(member.strip() for member in token.split("+") if member.strip())
+        if not members or "+".join(members) != token:
+            raise ValueError("invalid source factor: {}".format(token))
+        unknown = sorted(set(members) - set(PUBLISHED_OFFSETS_ARCSEC))
+        if unknown:
+            raise ValueError("unknown source names: {}".format(", ".join(unknown)))
+        repeated = sorted(set(members) & used)
+        if repeated:
+            raise ValueError(
+                "catalog sources occur in more than one factor: {}".format(
+                    ", ".join(repeated)
+                )
+            )
+        if len(set(members)) != len(members):
+            raise ValueError("source names within a factor must be unique")
+        groups[token] = members
+        used.update(members)
+    return groups
+
+
+def source_group_box_size(members, member_centers, center, padding=0):
+    """Smallest odd square containing every member's standard support."""
+
+    if len(members) == 1:
+        return source_box_size(members[0], padding)
+    extent = 0.0
+    for member in members:
+        half = (source_box_size(member, padding) - 1) / 2
+        extent = max(
+            extent,
+            float(np.max(np.abs(np.asarray(member_centers[member]) - center))) + half,
+        )
+    return 2 * int(np.ceil(extent)) + 1
+
+
 def aperture_spectrum(data, center, radius=2.5):
     yy, xx = np.indices(data.shape[1:], dtype=float)
     aperture = np.hypot(yy - center[0], xx - center[1]) <= radius
+    values = np.nansum(np.where(aperture[None], data, 0.0), axis=(1, 2))
+    floor = max(float(np.nanpercentile(np.abs(values), 10)) * 1e-6, 1e-20)
+    return np.maximum(values, floor)
+
+
+def grouped_aperture_spectrum(data, centers, radius=2.5):
+    """Initialize a merged spectrum from the union of member apertures."""
+
+    if len(centers) == 1:
+        return aperture_spectrum(data, centers[0], radius=radius)
+    yy, xx = np.indices(data.shape[1:], dtype=float)
+    aperture = np.zeros(data.shape[1:], dtype=bool)
+    for center in centers:
+        aperture |= np.hypot(yy - center[0], xx - center[1]) <= radius
     values = np.nansum(np.where(aperture[None], data, 0.0), axis=(1, 2))
     floor = max(float(np.nanpercentile(np.abs(values), 10)) * 1e-6, 1e-20)
     return np.maximum(values, floor)
@@ -472,18 +537,8 @@ def main() -> None:
     if args.spatial_smoothness_strength > 0 and args.optimizer != "adaprox":
         raise ValueError("spatial smoothness currently requires adaprox")
     dtype = np.dtype(args.dtype)
-    source_names = (
-        tuple(name.strip() for name in args.sources.split(",") if name.strip())
-        if args.sources
-        else DEFAULT_SOURCE_NAMES[args.mode]
-    )
-    unknown = sorted(set(source_names) - set(PUBLISHED_OFFSETS_ARCSEC))
-    if unknown:
-        raise ValueError("unknown source names: {}".format(", ".join(unknown)))
-    if not source_names:
-        raise ValueError("at least one source must be selected")
-    if len(set(source_names)) != len(source_names):
-        raise ValueError("source names must be unique")
+    source_groups = parse_source_groups(args.sources, args.mode)
+    source_names = tuple(source_groups)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     loaded = load_ifu_cube(
@@ -502,7 +557,13 @@ def main() -> None:
     all_centers = OrderedDict(
         (name, center + lens_shift) for name, center in all_centers.items()
     )
-    centers = OrderedDict((name, all_centers[name]) for name in source_names)
+    centers = OrderedDict(
+        (
+            name,
+            np.mean([all_centers[member] for member in members], axis=0),
+        )
+        for name, members in source_groups.items()
+    )
     excluded = source_exclusion_mask(
         data.shape[1:], all_centers, args.background_radius
     )
@@ -551,12 +612,26 @@ def main() -> None:
 
     sources = []
     source_constraints = OrderedDict()
+    source_box_sizes = OrderedDict()
     source_spectral_scales = OrderedDict()
     source_spatial_scales = OrderedDict()
     for name in source_names:
+        members = source_groups[name]
         center = latent_centers[name]
-        sigma = INITIAL_SIGMA_PX.get(name, 1.3)
-        box_size = source_box_size(name, args.support_padding)
+        member_latent_centers = {
+            member: all_centers[member] + psf_offset for member in members
+        }
+        spread_squared = np.mean(
+            [np.sum((member_latent_centers[member] - center) ** 2) for member in members]
+        )
+        sigma = np.sqrt(
+            max(INITIAL_SIGMA_PX.get(member, 1.3) ** 2 for member in members)
+            + spread_squared
+        )
+        box_size = source_group_box_size(
+            members, member_latent_centers, center, args.support_padding
+        )
+        source_box_sizes[name] = box_size
         morphology_box = source_morphology_box(data.shape[1:], center, box_size)
         local_center = center - np.asarray(morphology_box.origin)
         morphology_start = gaussian_morphology(
@@ -565,7 +640,12 @@ def main() -> None:
         source_spatial_scales[name] = max(
             float(np.mean(np.abs(morphology_start))), np.finfo(float).tiny
         )
-        spectrum_start = np.asarray(aperture_spectrum(data, centers[name]), dtype=dtype)
+        spectrum_start = np.asarray(
+            grouped_aperture_spectrum(
+                data, [all_centers[member] for member in members]
+            ),
+            dtype=dtype,
+        )
         source_spectral_scales[name] = max(
             float(np.mean(spectrum_start)), np.finfo(float).tiny
         )
@@ -580,8 +660,12 @@ def main() -> None:
         spectrum = spaxlet.TabulatedSpectrum(
             frame, spectrum_start, constraint=spectral_constraint
         )
-        source_constraints[name] = source_constraint_name(
-            name, args.morphology_constraint
+        # The finite combined support preserves a merged component's identity.
+        # A catalog-centroid equality would incorrectly assume equal member flux.
+        source_constraints[name] = (
+            "positivity"
+            if len(members) > 1
+            else source_constraint_name(name, args.morphology_constraint)
         )
         morphology = spaxlet.ImageMorphology(
             frame,
@@ -712,10 +796,8 @@ def main() -> None:
         "wavelength_um": [float(wavelength_um[0]), float(wavelength_um[-1])],
         "pixel_scale_arcsec": pixel_scale,
         "source_names": list(source_names),
-        "source_box_size_px": {
-            name: source_box_size(name, args.support_padding)
-            for name in source_names
-        },
+        "source_groups": {name: list(members) for name, members in source_groups.items()},
+        "source_box_size_px": source_box_sizes,
         "support_padding_px_per_side": args.support_padding,
         "morphology_constraint": args.morphology_constraint,
         "spatial_smoothness_strength": args.spatial_smoothness_strength,
