@@ -155,3 +155,75 @@ to override either discovered path.
 `collaborator_reproduction.ipynb` wraps the same two module commands for
 interactive review. Its first code cell is the only configuration surface;
 the fit and plotting logic remain in the tested Python modules.
+
+## SPT0311-58 public-cube deblend
+
+`run_spt0311_deblend.py` is a truth-independent, many-source test on the public
+MAST NIRSpec IFU cubes associated with arXiv:2312.00899. It registers the
+paper's relative source catalog through the foreground lens, extracts a
+wavelength-dependent empirical PSF from standard star 1808347, calibrates the
+blank-sky level and ERR scale, and simultaneously fits one positive
+spectrum-morphology factor for each catalog component. Finite local morphology
+supports prevent a fixed centroid from being satisfied by unphysical distant
+lobes. Those support sizes and the SPT0311 catalog are benchmark choices, not
+Scarlet defaults.
+
+Reusable operations discovered while building the test live in core:
+`spaxlet.empirical_psf_kernels`, `spaxlet.estimate_ifu_background`, and
+`spaxlet.measure.factorization`. Their focused tests do not depend on the
+downloaded JWST files.
+
+Example broad PRISM run (15 components):
+
+```bash
+python benchmarks/run_spt0311_deblend.py \
+  --cube data/spt0311_mast/jw01264-o013_t010_nirspec_prism-clear_s3d.fits \
+  --psf-cube data/spt0311_mast/calibration_star_1808347/jw01128-o009_t007_nirspec_prism-clear_s3d.fits \
+  --output-dir benchmark_artifacts/spt0311_prism_many_source \
+  --mode prism --wavelength-min 2.85 --wavelength-max 5.25 \
+  --max-iter 25 --channel-chunk-size 64
+```
+
+Example G395H H-beta/[O III] run (16 components, including L7):
+
+```bash
+python benchmarks/run_spt0311_deblend.py \
+  --cube data/spt0311_mast/jw01264-o013_t010_nirspec_g395h-f290lp_s3d.fits \
+  --psf-cube data/spt0311_mast/calibration_star_1808347/jw01128-o009_t007_nirspec_g395h-f290lp_s3d.fits \
+  --output-dir benchmark_artifacts/spt0311_g395h_oiii_many_source \
+  --mode g395h --wavelength-min 3.75 --wavelength-max 4.02 \
+  --max-iter 20 --channel-chunk-size 64
+```
+
+Each run writes a FITS spectral table, a compressed NPZ containing normalized
+morphologies/model/residuals, and a JSON report with mask, PSF, noise, fit, and
+provenance diagnostics. Plot a product with:
+
+```bash
+python benchmarks/plot_spt0311_deblend.py \
+  --product benchmark_artifacts/spt0311_g395h_oiii_many_source/spt0311_deblend.npz \
+  --spectra benchmark_artifacts/spt0311_g395h_oiii_many_source/spt0311_deblended_spectra.fits \
+  --output benchmark_artifacts/spt0311_g395h_oiii_many_source/diagnostic.png
+```
+
+These are archive-pipeline pilots, not measurements from the paper's custom
+0.05-arcsec reduction. The finite iteration budgets also leave morphology
+projected-gradient residuals around `1e-2`; use larger budgets and stability
+tests before treating extracted line fluxes as final science products.
+
+The real-cube runner defaults to joint constrained NMF (`adaprox`/AMSGrad),
+with a nonnegative tabulated spectrum outer-producted with a nonnegative local
+morphology for every component. A G395H constraint ladder is available through
+`--morphology-constraint`: `positivity`, exact `centroid`, `monotonic`,
+`symmetry`, and benchmark-selected hybrid arms. On the 3.75--4.02 um pilot,
+positivity alone gives the lowest chi-square but allows nine source identities
+to move by more than one spaxel. Exact centroid plus positivity costs only
+0.36% in chi-square and eliminates every such drift, so it is the selected
+default. Global monotonicity and symmetry are rejected by the comparison.
+
+`compare_spt0311_constraints.py` records fit, source-drift, morphology-area,
+180-degree-asymmetry, and spectrum-stability diagnostics for precomputed arms.
+The first supplied arm is the spectral and symmetry-selection reference. The
+diagnostic plot uses a shared numerical MJy/sr color scale for data, model, and
+residual, with labeled colorbars and cube-level RMS values; its whitened panel
+retains a separate standardized scale.

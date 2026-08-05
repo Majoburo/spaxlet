@@ -18,22 +18,23 @@ term are opt-in.
 
 | Area | Addition or fix | Primary files | Commits |
 |---|---|---|---|
-| Matched forward model | Explicit intrinsic-frame `DeltaPSF`; corrected PSF matching and factor initialization | `scarlet/frame.py`, `scarlet/psf.py`, `scarlet/observation.py`, `scarlet/renderer.py`, `scarlet/blend.py` | `f439243`, `85a76d1`, `8b13357`, `24255dd` |
-| IFU ingestion | Mask-safe `Observation.from_ifu_arrays`, measured variance, physical wavelength grids, strict channel compatibility | `scarlet/observation.py`, `scarlet/frame.py` | `4979b2e`, `e13b915`, `ed95b6e` |
-| IFU PSFs | Channel-mapped PSFs plus deterministic crop, centroid measurement, and subpixel recentering | `scarlet/ifu.py`, `scarlet/renderer.py`, `scarlet/fft.py` | `5dbff71`, `bc85078` |
-| Spatially varying PSF | Opt-in fixed field-PSF renderer with bilinear spatial interpolation and adjoint | `scarlet/ifu.py`, `scarlet/renderer.py` | `538b457` |
-| Constraints | Coordinate-aware constraints; centered symmetry/monotonicity arms; exact Dykstra intersection of positivity and a linear centroid constraint; resize-safe centers | `scarlet/constraint.py`, `scarlet/morphology.py` | `a62d79a`, `d6a1ef7`, `d1c68e3`, `1307683`, `bbd25b5`, `96f23ee`, `96d9d11`, `1e5cd16` |
-| Optimization | Bounded-memory channel chunks, projected-gradient/KKT diagnostics, KKT stopping, and scalar-metric constrained variable projection | `scarlet/blend.py`, `scarlet/optimization.py`, `scarlet/renderer.py` | `9de4e8c`, `8557251`, `e6b5a06`, `02e1ed2`, `ac43f63` |
-| Identifiability | Exact pairwise non-negative mixing intervals/envelopes and an active normalized spectral log-volume objective | `scarlet/degeneracy.py`, `scarlet/optimization.py` | `dc65f95`, `ac43f63`, `e52ccb2` |
+| Matched forward model | Explicit intrinsic-frame `DeltaPSF`; corrected PSF matching and factor initialization | `spaxlet/frame.py`, `spaxlet/psf.py`, `spaxlet/observation.py`, `spaxlet/renderer.py`, `spaxlet/blend.py` | `f439243`, `85a76d1`, `8b13357`, `24255dd` |
+| IFU ingestion | Mask-safe `Observation.from_ifu_arrays`, measured variance, physical wavelength grids, strict channel compatibility | `spaxlet/observation.py`, `spaxlet/frame.py` | `4979b2e`, `e13b915`, `ed95b6e` |
+| IFU PSFs | Channel-mapped PSFs plus deterministic crop, centroid measurement, and subpixel recentering | `spaxlet/ifu.py`, `spaxlet/renderer.py`, `spaxlet/fft.py` | `5dbff71`, `bc85078` |
+| Spatially varying PSF | Opt-in fixed field-PSF renderer with bilinear spatial interpolation and adjoint | `spaxlet/ifu.py`, `spaxlet/renderer.py` | `538b457` |
+| Constraints | Coordinate-aware constraints; centered symmetry/monotonicity arms; exact Dykstra intersection of positivity and a linear centroid constraint; resize-safe centers | `spaxlet/constraint.py`, `spaxlet/morphology.py` | `a62d79a`, `d6a1ef7`, `d1c68e3`, `1307683`, `bbd25b5`, `96f23ee`, `96d9d11`, `1e5cd16` |
+| Optimization | Bounded-memory channel chunks, projected-gradient/KKT diagnostics, KKT stopping, and scalar-metric constrained variable projection | `spaxlet/blend.py`, `spaxlet/optimization.py`, `spaxlet/renderer.py` | `9de4e8c`, `8557251`, `e6b5a06`, `02e1ed2`, `ac43f63` |
+| Identifiability | Exact pairwise non-negative mixing intervals/envelopes and an active normalized spectral log-volume objective | `spaxlet/degeneracy.py`, `spaxlet/optimization.py` | `dc65f95`, `ac43f63`, `e52ccb2` |
 | PSF coordinate frame | Centroid constraints and truth scores now use the latent frame implied by PSF recentering | `benchmarks/run_collaborator_reproduction.py`, `benchmarks/ifu_parity_metrics.py` | `1633662`, `3029d51` |
 | Reproduction/plots | Shared contracts and strict metrics, provenance, batch driver, notebook, latent/rendered factor plots, and converged spectral offsets | `benchmarks/`, `submit_collaborator_reproduction.sh` | `6e7c9aa`, `61f539d`, `9306805`, `be8614e`, `712bc90`, `3dd5153` |
+| Real-cube preprocessing | Empirical stellar IFU PSFs, robust blank-sky/ERR calibration, and fixed-gauge factor reporting are reusable Scarlet APIs; SPT0311 catalog/support choices remain benchmark-local | `spaxlet/ifu.py`, `spaxlet/measure.py`, `benchmarks/run_spt0311_deblend.py` | working tree |
 
 The most useful API entry points are:
 
 ```python
-observation = scarlet.Observation.from_ifu_arrays(...)
-kernels, retained = scarlet.crop_psf_kernels(kernels, size)
-kernels, removed_shift = scarlet.recenter_psf_kernels(kernels)
+observation = spaxlet.Observation.from_ifu_arrays(...)
+kernels, retained = spaxlet.crop_psf_kernels(kernels, size)
+kernels, removed_shift = spaxlet.recenter_psf_kernels(kernels)
 
 iterations, objective = blend.fit(
     max_iter,
@@ -78,9 +79,9 @@ The volume term is mathematically active and cheap, but strengths `100` and
 ## Reading and validation order
 
 1. `benchmarks/run_collaborator_reproduction.py` for the complete experiment.
-2. `scarlet/optimization.py` for variable projection and spectral volume.
-3. `scarlet/constraint.py` for exact centroid/positivity projection.
-4. `scarlet/observation.py`, `scarlet/ifu.py`, and `scarlet/renderer.py` for the
+2. `spaxlet/optimization.py` for variable projection and spectral volume.
+3. `spaxlet/constraint.py` for exact centroid/positivity projection.
+4. `spaxlet/observation.py`, `spaxlet/ifu.py`, and `spaxlet/renderer.py` for the
    IFU forward model.
 5. `tests/test_variable_projection.py`, `tests/test_ifu_exact_projection.py`,
    `tests/test_ifu_observation_arrays.py`, and `tests/test_ifu_varying_renderer.py`

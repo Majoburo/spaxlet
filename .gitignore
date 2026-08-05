@@ -17,3 +17,7 @@ docs/_templates
 docs/hsc_cosmos_35.sca
 data/collaborator/
 benchmark_artifacts/
+data/spt0311_mast/**/*.fits
+data/spt0311_mast/*.fits
+data/spt0311_mast/*.json
+data/spt0311_mast/*.csv

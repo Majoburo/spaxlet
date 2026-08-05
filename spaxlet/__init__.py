@@ -24,6 +24,9 @@ from .degeneracy import (
 from .frame import Frame
 from .ifu import (
     crop_psf_kernels,
+    empirical_psf_kernels,
+    estimate_ifu_background,
+    IFUBackgroundEstimate,
     psf_centroids,
     recenter_psf_kernels,
     spatial_interpolation_weights,

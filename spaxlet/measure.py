@@ -1,6 +1,36 @@
+from collections import namedtuple
+
 import numpy as np
+
 from . import initialization
 from .bbox import Box
+from .component import FactorizedComponent
+
+
+Factorization = namedtuple("Factorization", ("spectrum", "morphology"))
+
+
+def factorization(component):
+    """Return a factorized component in a unit-sum morphology gauge.
+
+    The source model is unchanged by this reporting convention: the raw
+    morphology sum is transferred into the spectrum. This is useful for
+    comparing, saving, and measuring bilinear components whose internal scale
+    gauge is otherwise arbitrary.
+    """
+    if not isinstance(component, FactorizedComponent):
+        raise TypeError("factorization requires a FactorizedComponent")
+    morphology = np.asarray(component.morphology.get_model(), dtype=float)
+    spectrum = np.asarray(component.spectrum.get_model(), dtype=float)
+    if np.any(~np.isfinite(morphology)) or np.any(~np.isfinite(spectrum)):
+        raise ValueError("factorized component contains non-finite values")
+    scale = float(np.sum(morphology))
+    if scale <= np.finfo(float).tiny:
+        raise ValueError("factorized component morphology has no positive flux")
+    return Factorization(
+        spectrum=spectrum * scale,
+        morphology=morphology / scale,
+    )
 
 
 def max_pixel(component):

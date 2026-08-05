@@ -19,6 +19,35 @@ def _gaussian_stack(sigmas, size=9):
 
 
 class IFUPSFPreprocessingTest(unittest.TestCase):
+    def test_empirical_cube_extraction_removes_background_and_recenters(self):
+        size = 17
+        yy, xx = np.indices((size, size), dtype=float)
+        cube = np.asarray(
+            [
+                3.0
+                + (channel + 1)
+                * np.exp(
+                    -0.5
+                    * (((yy - 8.30) / 1.1) ** 2 + ((xx - 7.65) / 1.1) ** 2)
+                )
+                for channel in range(5)
+            ]
+        )
+        cube[:, 0, 0] = np.nan
+
+        kernels, removed, peak = spaxlet.empirical_psf_kernels(
+            cube,
+            channel_indices=np.asarray([1, 3]),
+            kernel_size=11,
+            spectral_half_width=1,
+        )
+
+        self.assertEqual(kernels.shape, (2, 11, 11))
+        self.assertEqual(peak, (8, 8))
+        np.testing.assert_allclose(np.sum(kernels, axis=(1, 2)), 1)
+        self.assertGreater(np.max(np.abs(removed)), 0.2)
+        self.assertLess(np.max(np.abs(spaxlet.psf_centroids(kernels))), 0.02)
+
     def test_crop_reports_retained_flux_and_warns_for_offset_centroid(self):
         kernels = np.zeros((2, 8, 8), dtype=float)
         kernels[:, 3, 3] = 1
@@ -58,6 +87,13 @@ class IFUPSFPreprocessingTest(unittest.TestCase):
             lambda: spaxlet.crop_psf_kernels(valid, 4),
             lambda: spaxlet.crop_psf_kernels(valid, 11),
             lambda: spaxlet.crop_psf_kernels(valid[:, :, :-1], 7),
+            lambda: spaxlet.empirical_psf_kernels(
+                np.ones((2, 7, 7)), kernel_size=4
+            ),
+            lambda: spaxlet.empirical_psf_kernels(
+                np.ones((2, 7, 7)), channel_indices=np.asarray([2])
+            ),
+            lambda: spaxlet.empirical_psf_kernels(np.full((2, 7, 7), np.nan)),
         )
         for call in invalid_calls:
             with self.subTest(call=call):
