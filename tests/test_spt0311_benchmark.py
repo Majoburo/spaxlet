@@ -8,7 +8,9 @@ from astropy.io.fits import Header
 from benchmarks.run_spt0311_deblend import (
     PUBLISHED_OFFSETS_ARCSEC,
     catalog_centers_yx,
+    morphology_parameter,
     selected_channel_indices,
+    source_box_size,
     source_constraint_name,
     source_morphology_box,
 )
@@ -61,6 +63,12 @@ class SPT0311BenchmarkTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             source_morphology_box((20, 30), (5, 5), 8)
 
+        self.assertEqual(source_box_size("lens"), 21)
+        self.assertEqual(source_box_size("lens", padding=2), 25)
+        self.assertEqual(source_box_size("C1", padding=2), 15)
+        with self.assertRaises(ValueError):
+            source_box_size("C1", padding=-1)
+
     def test_hybrid_constraint_selection_is_explicit(self):
         self.assertEqual(source_constraint_name("lens", "hybrid"), "symmetry")
         self.assertEqual(source_constraint_name("E", "hybrid"), "positivity")
@@ -68,6 +76,25 @@ class SPT0311BenchmarkTest(unittest.TestCase):
             source_constraint_name("E", "hybrid_centered"), "centroid"
         )
         self.assertEqual(source_constraint_name("E", "monotonic"), "monotonic")
+
+    def test_spatial_smoothness_is_joint_with_identity_constraints(self):
+        image = np.zeros((7, 7))
+        image[3, 3] = 1
+        parameter = morphology_parameter(
+            image, (3, 3), "centroid", spatial_smoothness_strength=100
+        )
+        projected = parameter.constraint(image.copy(), step=0.01)
+        rows, columns = np.indices(image.shape, dtype=float)
+
+        self.assertTrue(np.all(projected >= -1e-12))
+        self.assertLess(projected[3, 3], 1)
+        np.testing.assert_allclose(
+            [np.sum(rows * projected), np.sum(columns * projected)],
+            3 * projected.sum(),
+            atol=1e-9,
+        )
+        with self.assertRaises(ValueError):
+            morphology_parameter(image, (3, 3), "monotonic", 1)
 
 
 if __name__ == "__main__":

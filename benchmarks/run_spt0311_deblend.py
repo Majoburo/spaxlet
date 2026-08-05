@@ -99,6 +99,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--background-radius", type=float, default=4.0)
     parser.add_argument("--noise-scale", type=float)
     parser.add_argument(
+        "--support-padding",
+        type=int,
+        default=0,
+        help="non-negative pixels added to each side of every local morphology",
+    )
+    parser.add_argument(
         "--morphology-constraint",
         choices=(
             "positivity",
@@ -113,6 +119,18 @@ def _parser() -> argparse.ArgumentParser:
         help="identity-preserving positivity plus centroid is the selected default",
     )
     parser.add_argument("--max-iter", type=int, default=50)
+    parser.add_argument(
+        "--spectral-smoothness-strength",
+        type=float,
+        default=0,
+        help="quadratic physical-wavelength curvature penalty; zero disables it",
+    )
+    parser.add_argument(
+        "--spatial-smoothness-strength",
+        type=float,
+        default=0,
+        help="quadratic nearest-neighbor morphology penalty; zero disables it",
+    )
     parser.add_argument("--relative-tolerance", type=float, default=1e-7)
     parser.add_argument("--optimality-tolerance", type=float)
     parser.add_argument("--optimality-check-interval", type=int, default=5)
@@ -319,6 +337,15 @@ def source_morphology_box(image_shape, center, size):
     return spaxlet.Box((size, size), origin=tuple(origin))
 
 
+def source_box_size(source_name, padding=0):
+    """Return a benchmark support width after symmetric integer padding."""
+
+    if not isinstance(padding, (int, np.integer)) or padding < 0:
+        raise ValueError("support padding must be a non-negative integer")
+    base = SOURCE_BOX_SIZE_PX.get(source_name, DEFAULT_BOX_SIZE_PX)
+    return base + 2 * padding
+
+
 def aperture_spectrum(data, center, radius=2.5):
     yy, xx = np.indices(data.shape[1:], dtype=float)
     aperture = np.hypot(yy - center[0], xx - center[1]) <= radius
@@ -335,28 +362,58 @@ def source_constraint_name(source_name, requested):
     return "centroid" if requested == "hybrid_centered" else "positivity"
 
 
-def morphology_parameter(image, center, constraint_name):
+def morphology_parameter(
+    image, center, constraint_name, spatial_smoothness_strength=0
+):
     # Integer-centered heuristic operators must use the geometric center of
     # the fixed support. Otherwise an off-center symmetry patch leaves an
     # unpaired border that can absorb unconstrained flux.
     integer_center = tuple(int((size - 1) // 2) for size in image.shape)
+    if not np.isfinite(spatial_smoothness_strength) or spatial_smoothness_strength < 0:
+        raise ValueError("spatial smoothness strength must be non-negative")
+    spatial = None
+    if spatial_smoothness_strength > 0:
+        reference_scale = max(
+            float(np.mean(np.abs(image))), np.finfo(float).tiny
+        )
+        spatial = spaxlet.SpatialSmoothnessConstraint(
+            spatial_smoothness_strength, reference_scale=reference_scale
+        )
+
     if constraint_name == "positivity":
-        constraint = spaxlet.PositivityConstraint()
+        constraint = (
+            spaxlet.PositivityConstraint()
+            if spatial is None
+            else spaxlet.ProximalDykstraConstraintChain(
+                spatial, spaxlet.PositivityConstraint()
+            )
+        )
     elif constraint_name == "centroid":
-        constraint = spaxlet.DykstraConstraintChain(
+        constraints = (
             spaxlet.CentroidConstraint(center),
             spaxlet.PositivityConstraint(),
-            max_iter=20000,
-            rtol=1e-11,
-            atol=1e-12,
+        )
+        constraint = (
+            spaxlet.DykstraConstraintChain(
+                *constraints, max_iter=20000, rtol=1e-11, atol=1e-12
+            )
+            if spatial is None
+            else spaxlet.ProximalDykstraConstraintChain(spatial, *constraints)
         )
     elif constraint_name == "symmetry":
-        constraint = spaxlet.ConstraintChain(
+        constraints = (
             spaxlet.SymmetryConstraint(center=integer_center),
             spaxlet.PositivityConstraint(),
             spaxlet.CenterOnConstraint(center=integer_center),
         )
+        constraint = (
+            spaxlet.ConstraintChain(*constraints)
+            if spatial is None
+            else spaxlet.ProximalDykstraConstraintChain(spatial, *constraints)
+        )
     elif constraint_name == "monotonic":
+        if spatial is not None:
+            raise ValueError("spatial smoothness is not combined with monotonicity")
         constraint = spaxlet.ConstraintChain(
             spaxlet.MonotonicityConstraint(
                 center=integer_center,
@@ -367,6 +424,8 @@ def morphology_parameter(image, center, constraint_name):
             spaxlet.CenterOnConstraint(center=integer_center),
         )
     elif constraint_name == "monotonic_symmetry":
+        if spatial is not None:
+            raise ValueError("spatial smoothness is not combined with monotonicity")
         constraint = spaxlet.ConstraintChain(
             spaxlet.MonotonicityConstraint(
                 center=integer_center,
@@ -396,6 +455,22 @@ def main() -> None:
     args = _parser().parse_args()
     if args.max_iter < 0:
         raise ValueError("max_iter must be non-negative")
+    if args.support_padding < 0:
+        raise ValueError("support padding must be non-negative")
+    if (
+        not np.isfinite(args.spatial_smoothness_strength)
+        or args.spatial_smoothness_strength < 0
+    ):
+        raise ValueError("spatial smoothness strength must be non-negative")
+    if (
+        not np.isfinite(args.spectral_smoothness_strength)
+        or args.spectral_smoothness_strength < 0
+    ):
+        raise ValueError("spectral smoothness strength must be non-negative")
+    if args.spectral_smoothness_strength > 0 and args.optimizer != "adaprox":
+        raise ValueError("spectral smoothness currently requires adaprox")
+    if args.spatial_smoothness_strength > 0 and args.optimizer != "adaprox":
+        raise ValueError("spatial smoothness currently requires adaprox")
     dtype = np.dtype(args.dtype)
     source_names = (
         tuple(name.strip() for name in args.sources.split(",") if name.strip())
@@ -476,24 +551,45 @@ def main() -> None:
 
     sources = []
     source_constraints = OrderedDict()
+    source_spectral_scales = OrderedDict()
+    source_spatial_scales = OrderedDict()
     for name in source_names:
         center = latent_centers[name]
         sigma = INITIAL_SIGMA_PX.get(name, 1.3)
-        box_size = SOURCE_BOX_SIZE_PX.get(name, DEFAULT_BOX_SIZE_PX)
+        box_size = source_box_size(name, args.support_padding)
         morphology_box = source_morphology_box(data.shape[1:], center, box_size)
         local_center = center - np.asarray(morphology_box.origin)
         morphology_start = gaussian_morphology(
             morphology_box.shape, local_center, sigma, dtype
         )
+        source_spatial_scales[name] = max(
+            float(np.mean(np.abs(morphology_start))), np.finfo(float).tiny
+        )
         spectrum_start = np.asarray(aperture_spectrum(data, centers[name]), dtype=dtype)
-        spectrum = spaxlet.TabulatedSpectrum(frame, spectrum_start)
+        source_spectral_scales[name] = max(
+            float(np.mean(spectrum_start)), np.finfo(float).tiny
+        )
+        spectral_constraint = None
+        if args.spectral_smoothness_strength > 0:
+            spectral_constraint = spaxlet.SpectralSmoothnessConstraint(
+                wavelength_um,
+                args.spectral_smoothness_strength,
+                reference_scale=source_spectral_scales[name],
+                zero=1e-20,
+            )
+        spectrum = spaxlet.TabulatedSpectrum(
+            frame, spectrum_start, constraint=spectral_constraint
+        )
         source_constraints[name] = source_constraint_name(
             name, args.morphology_constraint
         )
         morphology = spaxlet.ImageMorphology(
             frame,
             morphology_parameter(
-                morphology_start, local_center, source_constraints[name]
+                morphology_start,
+                local_center,
+                source_constraints[name],
+                args.spatial_smoothness_strength,
             ),
             bbox=morphology_box,
             resizing=False,
@@ -617,10 +713,15 @@ def main() -> None:
         "pixel_scale_arcsec": pixel_scale,
         "source_names": list(source_names),
         "source_box_size_px": {
-            name: SOURCE_BOX_SIZE_PX.get(name, DEFAULT_BOX_SIZE_PX)
+            name: source_box_size(name, args.support_padding)
             for name in source_names
         },
+        "support_padding_px_per_side": args.support_padding,
         "morphology_constraint": args.morphology_constraint,
+        "spatial_smoothness_strength": args.spatial_smoothness_strength,
+        "spectral_smoothness_strength": args.spectral_smoothness_strength,
+        "source_spectral_reference_scale": source_spectral_scales,
+        "source_spatial_reference_scale": source_spatial_scales,
         "source_morphology_constraints": source_constraints,
         "mast_target_reference_yx": reference_yx.tolist(),
         "lens_registration_shift_yx": lens_shift.tolist(),

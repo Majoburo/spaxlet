@@ -33,7 +33,7 @@ def _parser():
     )
     parser.add_argument(
         "--sources",
-        default="E,W,L7,C1,C2,C3",
+        default="lens,E,W,C1,C2,C3",
         help="comma-separated spectra to plot when present",
     )
     return parser

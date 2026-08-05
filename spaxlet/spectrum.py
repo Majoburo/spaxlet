@@ -44,14 +44,22 @@ class TabulatedSpectrum(Spectrum):
         1D bounding box for focation of the spectrum in `frame`
     min_step: float
         Minimum absolute step size for spectrum element updates.
+    constraint: `~spaxlet.Constraint`, optional
+        Explicit constraint for a raw spectral array. The historical default
+        is positivity with a tiny positive floor.
     """
 
-    def __init__(self, frame, spectrum, bbox=None, min_step=0):
+    def __init__(self, frame, spectrum, bbox=None, min_step=0, constraint=None):
         if isinstance(spectrum, Parameter):
             assert spectrum.name == "spectrum"
+            if constraint is not None:
+                raise ValueError(
+                    "constraint must be attached to an explicit spectrum Parameter"
+                )
         else:
             # slightly positive values
-            constraint = PositivityConstraint(zero=1e-20)
+            if constraint is None:
+                constraint = PositivityConstraint(zero=1e-20)
             # steps of 1% of mean amplitude, minimum set by noise_rms
             step = partial(relative_step, factor=1e-2, minimum=min_step)
             spectrum = Parameter(

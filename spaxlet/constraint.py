@@ -2,6 +2,9 @@ from functools import partial
 
 import numpy as np
 import proxmin
+from scipy.linalg import solve_banded
+from scipy.sparse import coo_matrix, eye
+from scipy.sparse.linalg import spsolve
 
 from . import operator
 from .cache import Cache
@@ -224,6 +227,61 @@ class DykstraConstraintChain(ConstraintChain):
         )
 
 
+class ProximalDykstraConstraintChain(ConstraintChain):
+    """Proximal map of a sum of convex penalties via Dykstra splitting.
+
+    Unlike :class:`DykstraConstraintChain`, members need not be projections:
+    each can be the proximal map of a convex penalty. This permits a quadratic
+    smoothness penalty to be combined with exact positivity, centroid, or
+    symmetry indicators without making their result depend on operator order.
+    """
+
+    def __init__(self, *constraints, max_iter=2000, rtol=1e-8, atol=1e-10):
+        if not constraints:
+            raise ValueError("a proximal Dykstra chain requires constraints")
+        if not isinstance(max_iter, (int, np.integer)) or max_iter < 1:
+            raise ValueError("max_iter must be a positive integer")
+        if not np.isfinite(rtol) or rtol < 0:
+            raise ValueError("rtol must be finite and non-negative")
+        if not np.isfinite(atol) or atol < 0:
+            raise ValueError("atol must be finite and non-negative")
+        super().__init__(*constraints, repeat=1)
+        self.max_iter = int(max_iter)
+        self.rtol = float(rtol)
+        self.atol = float(atol)
+
+    def __call__(self, X, step):
+        original = np.asarray(X)
+        result = original.copy()
+        corrections = [np.zeros_like(result) for _ in self.constraints]
+        scale = max(float(np.linalg.norm(original)), 1.0)
+        dtype = original.dtype if np.issubdtype(original.dtype, np.floating) else float
+        numerical_floor = 10 * np.finfo(dtype).eps * scale
+        threshold = max(self.atol + self.rtol * scale, numerical_floor)
+        for _ in range(self.max_iter):
+            previous = result.copy()
+            for index, constraint in enumerate(self.constraints):
+                shifted = result + corrections[index]
+                proximal = np.asarray(constraint(shifted.copy(), step))
+                if proximal.shape != original.shape:
+                    raise ValueError("constraints in a chain must preserve shape")
+                corrections[index] = shifted - proximal
+                result = proximal
+            if float(np.linalg.norm(result - previous)) <= threshold:
+                return result
+        raise RuntimeError(
+            "proximal Dykstra did not converge in {} sweeps".format(self.max_iter)
+        )
+
+    def shifted(self, offset):
+        return ProximalDykstraConstraintChain(
+            *(constraint.shifted(offset) for constraint in self.constraints),
+            max_iter=self.max_iter,
+            rtol=self.rtol,
+            atol=self.atol
+        )
+
+
 class PositivityConstraint(Constraint):
     """Allow only values not smaller than `zero`.
     """
@@ -236,6 +294,267 @@ class PositivityConstraint(Constraint):
     def __call__(self, X, step):
         X = np.maximum(X, self.zero)
         return X
+
+
+class SpectralSmoothnessConstraint(Constraint):
+    """Non-negative spectrum with quadratic wavelength-curvature penalty.
+
+    The penalty is ``0.5 * strength * ||D2 spectrum||**2``, where ``D2`` is
+    the second divided difference on the physical wavelength grid, normalized
+    so that a uniformly sampled grid has the familiar ``[1, -2, 1]`` stencil.
+    Large wavelength gaps start independent segments and are never smoothed
+    across. Positivity and the quadratic penalty are combined with proximal
+    Dykstra iterations, yielding the proximal map of their sum rather than an
+    order-dependent smoothing-and-clipping heuristic.
+
+    Parameters
+    ----------
+    wavelengths: one-dimensional array
+        Strictly increasing physical wavelengths. Units cancel after the grid
+        is normalized by its median spacing.
+    strength: float
+        Non-negative dimensionless curvature-penalty strength. Zero recovers
+        positivity.
+    reference_scale: float
+        Positive fixed spectral-amplitude scale. The physical quadratic
+        penalty weight is ``strength / reference_scale``. Declaring this scale
+        makes the proximal response invariant when an entire spectrum is
+        multiplied by a constant.
+    zero: float
+        Lower bound for every spectral coefficient.
+    gap_factor: float
+        Adjacent wavelength spacings larger than this multiple of the median
+        spacing split the regularizer into independent segments.
+    max_iter: int
+        Maximum proximal Dykstra sweeps.
+    rtol, atol: float
+        Relative and absolute iterate tolerances.
+    """
+
+    def __init__(
+        self,
+        wavelengths,
+        strength,
+        reference_scale=1,
+        zero=0,
+        gap_factor=5,
+        max_iter=100,
+        rtol=1e-8,
+        atol=1e-10,
+    ):
+        wavelengths = np.asarray(wavelengths, dtype=float)
+        if wavelengths.ndim != 1 or wavelengths.size == 0:
+            raise ValueError("wavelengths must be a non-empty one-dimensional array")
+        if not np.all(np.isfinite(wavelengths)):
+            raise ValueError("wavelengths must be finite")
+        spacing = np.diff(wavelengths)
+        if np.any(spacing <= 0):
+            raise ValueError("wavelengths must be strictly increasing")
+        if not np.isfinite(strength) or strength < 0:
+            raise ValueError("smoothness strength must be finite and non-negative")
+        if not np.isfinite(reference_scale) or reference_scale <= 0:
+            raise ValueError("reference_scale must be finite and positive")
+        if not np.isfinite(zero):
+            raise ValueError("spectral lower bound must be finite")
+        if not np.isfinite(gap_factor) or gap_factor <= 1:
+            raise ValueError("gap_factor must be finite and greater than one")
+        if not isinstance(max_iter, (int, np.integer)) or max_iter < 1:
+            raise ValueError("max_iter must be a positive integer")
+        if not np.isfinite(rtol) or rtol < 0:
+            raise ValueError("rtol must be finite and non-negative")
+        if not np.isfinite(atol) or atol < 0:
+            raise ValueError("atol must be finite and non-negative")
+
+        self.wavelengths = wavelengths
+        self.strength = float(strength)
+        self.reference_scale = float(reference_scale)
+        self.zero = float(zero)
+        self.gap_factor = float(gap_factor)
+        self.max_iter = int(max_iter)
+        self.rtol = float(rtol)
+        self.atol = float(atol)
+        self._curvature_bands = self._build_curvature_bands()
+
+    def _build_curvature_bands(self):
+        size = self.wavelengths.size
+        if size < 3:
+            return np.zeros((5, size), dtype=float)
+        spacing = np.diff(self.wavelengths)
+        typical = float(np.median(spacing))
+        coordinate = (self.wavelengths - self.wavelengths[0]) / typical
+        scaled_spacing = np.diff(coordinate)
+        gap = scaled_spacing > self.gap_factor
+
+        rows = []
+        columns = []
+        values = []
+        row = 0
+        for center in range(1, size - 1):
+            if gap[center - 1] or gap[center]:
+                continue
+            left = scaled_spacing[center - 1]
+            right = scaled_spacing[center]
+            normalization = 2 / (left + right)
+            coefficients = (
+                normalization / left,
+                -normalization * (1 / left + 1 / right),
+                normalization / right,
+            )
+            for column, value in zip(
+                (center - 1, center, center + 1), coefficients
+            ):
+                rows.append(row)
+                columns.append(column)
+                values.append(value)
+            row += 1
+        if row == 0:
+            return np.zeros((5, size), dtype=float)
+        curvature = coo_matrix(
+            (values, (rows, columns)), shape=(row, size), dtype=float
+        ).tocsr()
+        gram = (curvature.T @ curvature).tocsr()
+        bands = np.zeros((5, size), dtype=float)
+        bands[2] = gram.diagonal(0)
+        bands[1, 1:] = gram.diagonal(1)
+        bands[0, 2:] = gram.diagonal(2)
+        bands[3, :-1] = gram.diagonal(-1)
+        bands[4, :-2] = gram.diagonal(-2)
+        return bands
+
+    @staticmethod
+    def _scalar_step(step):
+        value = np.asarray(step, dtype=float)
+        if value.ndim == 0:
+            result = float(value)
+        elif value.size and np.all(value == value.flat[0]):
+            result = float(value.flat[0])
+        else:
+            raise ValueError(
+                "spectral smoothness requires a scalar proximal step"
+            )
+        if not np.isfinite(result) or result < 0:
+            raise ValueError("proximal step must be finite and non-negative")
+        return result
+
+    def _smooth(self, value, step):
+        weight = self.strength * step / self.reference_scale
+        if weight == 0 or value.size < 3:
+            return value.copy()
+        system = weight * self._curvature_bands
+        system[2] += 1
+        return solve_banded(
+            (2, 2), system, value, overwrite_ab=True, check_finite=False
+        )
+
+    def __call__(self, X, step):
+        original = np.asarray(X)
+        if original.ndim != 1 or original.shape != self.wavelengths.shape:
+            raise ValueError(
+                "spectral smoothness expects one value per declared wavelength"
+            )
+        resolved_step = self._scalar_step(step)
+        if resolved_step == 0 or self.strength == 0:
+            return np.maximum(original, self.zero)
+
+        result = original.copy()
+        smooth_correction = np.zeros_like(result)
+        positive_correction = np.zeros_like(result)
+        scale = max(float(np.linalg.norm(original)), 1.0)
+        threshold = self.atol + self.rtol * scale
+        for _ in range(self.max_iter):
+            previous = result.copy()
+            shifted = result + smooth_correction
+            smoothed = self._smooth(shifted, resolved_step)
+            smooth_correction = shifted - smoothed
+
+            shifted = smoothed + positive_correction
+            result = np.maximum(shifted, self.zero)
+            positive_correction = shifted - result
+            if float(np.linalg.norm(result - previous)) <= threshold:
+                return result
+        raise RuntimeError(
+            "spectral smoothness proximal map did not converge in {} sweeps".format(
+                self.max_iter
+            )
+        )
+
+
+class SpatialSmoothnessConstraint(Constraint):
+    """Quadratic nearest-neighbor coherence penalty for a 2-D morphology.
+
+    Its penalty is ``0.5 * strength * sum_edges (m_i - m_j)**2``. The exact
+    proximal map solves one sparse screened-Poisson system. Positivity and
+    identity constraints are intentionally separate and can be combined with
+    this penalty through :class:`ProximalDykstraConstraintChain`.
+
+    ``reference_scale`` is a fixed positive morphology amplitude. As with the
+    spectral smoothness constraint, dividing the physical penalty weight by
+    this scale makes the response invariant when both the morphology and its
+    optimizer step are rescaled together.
+    """
+
+    def __init__(self, strength, reference_scale=1):
+        if not np.isfinite(strength) or strength < 0:
+            raise ValueError("smoothness strength must be finite and non-negative")
+        if not np.isfinite(reference_scale) or reference_scale <= 0:
+            raise ValueError("reference_scale must be finite and positive")
+        self.strength = float(strength)
+        self.reference_scale = float(reference_scale)
+        self._laplacian_cache = {}
+
+    @staticmethod
+    def _scalar_step(step):
+        value = np.asarray(step, dtype=float)
+        if value.ndim == 0:
+            result = float(value)
+        elif value.size and np.all(value == value.flat[0]):
+            result = float(value.flat[0])
+        else:
+            raise ValueError("spatial smoothness requires a scalar proximal step")
+        if not np.isfinite(result) or result < 0:
+            raise ValueError("proximal step must be finite and non-negative")
+        return result
+
+    def _laplacian(self, shape):
+        if shape not in self._laplacian_cache:
+            height, width = shape
+            index = np.arange(height * width).reshape(shape)
+            first = []
+            second = []
+            if width > 1:
+                first.append(index[:, :-1].ravel())
+                second.append(index[:, 1:].ravel())
+            if height > 1:
+                first.append(index[:-1].ravel())
+                second.append(index[1:].ravel())
+            if not first:
+                result = coo_matrix((height * width, height * width), dtype=float)
+            else:
+                left = np.concatenate(first)
+                right = np.concatenate(second)
+                rows = np.repeat(np.arange(left.size), 2)
+                columns = np.column_stack((left, right)).ravel()
+                values = np.tile((1.0, -1.0), left.size)
+                difference = coo_matrix(
+                    (values, (rows, columns)),
+                    shape=(left.size, height * width),
+                ).tocsr()
+                result = (difference.T @ difference).tocsr()
+            self._laplacian_cache[shape] = result
+        return self._laplacian_cache[shape]
+
+    def __call__(self, X, step):
+        original = np.asarray(X)
+        if original.ndim != 2:
+            raise ValueError("spatial smoothness expects a 2-D morphology")
+        resolved_step = self._scalar_step(step)
+        weight = self.strength * resolved_step / self.reference_scale
+        if weight == 0 or original.size == 1:
+            return original.copy()
+        laplacian = self._laplacian(original.shape)
+        system = eye(original.size, format="csr") + weight * laplacian
+        result = spsolve(system, original.reshape(-1))
+        return np.asarray(result).reshape(original.shape)
 
 
 class NormalizationConstraint(Constraint):
