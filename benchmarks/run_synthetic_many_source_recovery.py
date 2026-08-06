@@ -115,6 +115,49 @@ def oracle_catalog():
     return tuple(entries)
 
 
+def holdout_mask(valid, stride, block=(8, 4, 4), seed=RECOVERY_SEED):
+    """Return a deterministic held-out subset of the valid voxels.
+
+    ``stride`` of 0 disables the holdout; otherwise about ``1/stride`` of the
+    voxels are withheld as contiguous blocks of shape ``block``.
+
+    Blocks, not interleaved voxels.  An interleaved holdout is not independent
+    of the fit when the noise is correlated: the contract's residual field has
+    spatial sigma 0.65 px and spectral AR(1) rho 0.42, so a model that absorbs
+    local noise structure also predicts a withheld voxel sitting inside it.
+    Measured on the support-size scan, an interleaved stride-11 holdout ranked
+    the arm that recovers truth best (max flux error 0.128) as its *worst* arm,
+    and preferred an oversized-support arm three times worse, because extra
+    freedom improved fitted and held-out chi-square alike.  A stride in raster
+    order is also degenerate against the grid: 33 = 3 x 11, so stride 11
+    withholds only columns 0, 11 and 22 of every row.
+
+    The block edges are each several correlation lengths, so a withheld block's
+    interior cannot be predicted from the fitted voxels around it.
+    """
+
+    if not stride:
+        return None
+    if stride < 2:
+        raise ValueError("holdout stride must be 0 or at least 2")
+    held = np.zeros(valid.shape, dtype=bool)
+    starts = [
+        np.arange(0, extent, size)
+        for extent, size in zip(valid.shape, block)
+    ]
+    grid = np.stack(np.meshgrid(*starts, indexing="ij"), axis=-1).reshape(-1, 3)
+    generator = np.random.default_rng(seed)
+    chosen = generator.permutation(len(grid))[: max(1, len(grid) // stride)]
+    for index in chosen:
+        origin = grid[index]
+        held[
+            origin[0] : origin[0] + block[0],
+            origin[1] : origin[1] + block[1],
+            origin[2] : origin[2] + block[2],
+        ] = True
+    return held & valid
+
+
 def _initial_image(entry, width_scale):
     half = entry.support // 2
     axis = np.arange(entry.support, dtype=float) - half
@@ -250,6 +293,7 @@ def fit_catalog(
     spectral_smoothness_strength=0,
     spatial_smoothness_strength=0,
     positivity=True,
+    holdout_stride=0,
 ):
     """Fit any catalog and return fitted factors with no truth comparison.
 
@@ -276,6 +320,14 @@ def fit_catalog(
     data, variance, valid, _, _ = recovery_noisy_cube(seed=seed)
     weights = np.zeros_like(variance)
     weights[valid] = 1.0 / variance[valid]
+    held_out = holdout_mask(valid, holdout_stride)
+    # Held-out voxels are removed from the fit by zeroing their weight, which
+    # is how the observation already represents a mask.  They are scored after
+    # the fit.  Plain chi-square cannot penalize extra freedom -- a spurious
+    # eleventh source lowers it -- so a truth-free selection between catalogs,
+    # support sizes or constraint strengths has to use this instead.
+    if held_out is not None:
+        weights[held_out] = 0.0
     channels = tuple("ch{:03d}".format(i) for i in range(RECOVERY_SHAPE[0]))
     frame = spaxlet.Frame(
         RECOVERY_SHAPE,
@@ -326,8 +378,17 @@ def fit_catalog(
 
     model = np.asarray(observation.render(blend.get_model()), dtype=float)
     residual = data - model
-    chi2 = float(np.sum(weights * residual**2)) / int(np.count_nonzero(valid))
+    fitted = valid if held_out is None else (valid & ~held_out)
+    chi2 = float(np.sum(weights * residual**2)) / int(np.count_nonzero(fitted))
+    if held_out is None:
+        held_out_chi2 = None
+    else:
+        held_out_chi2 = float(
+            np.sum(residual[held_out] ** 2 / variance[held_out])
+        ) / int(np.count_nonzero(held_out))
     return {
+        "held_out_chi2": held_out_chi2,
+        "held_out_count": 0 if held_out is None else int(np.count_nonzero(held_out)),
         "fitted_spectra": fitted_spectra,
         "fitted_morphologies": fitted_morphologies,
         "iterations": int(iterations),
