@@ -131,6 +131,7 @@ def _sources(
     spectral_smoothness_strength,
     spatial_smoothness_strength,
     catalog=None,
+    positivity=True,
 ):
     if catalog is None:
         catalog = oracle_catalog()
@@ -141,9 +142,19 @@ def _sources(
         origin = (spec.center[0] - half, spec.center[1] - half)
         box = spaxlet.Box((spec.support, spec.support), origin=origin)
         local_center = np.asarray(spec.centroid, dtype=float)
+        # Dropping positivity is a diagnostic arm only.  It isolates how much
+        # of the converged flux bias is a clipped-estimator effect: the fitted
+        # morphologies pin 25-49% of their in-support pixels at exactly zero
+        # while truth is strictly positive at every one of them.  Spectra stay
+        # nonnegative regardless, because the variable-projection amplitude
+        # step solves a nonnegative Gram system.
         identity_constraints = (
-            spaxlet.CentroidConstraint(local_center),
-            spaxlet.PositivityConstraint(),
+            (
+                spaxlet.CentroidConstraint(local_center),
+                spaxlet.PositivityConstraint(),
+            )
+            if positivity
+            else (spaxlet.CentroidConstraint(local_center),)
         )
         if spatial_smoothness_strength > 0:
             image_start = _initial_image(spec, START_WIDTH_SCALE[start])
@@ -238,6 +249,7 @@ def fit_catalog(
     optimizer="variable_projection",
     spectral_smoothness_strength=0,
     spatial_smoothness_strength=0,
+    positivity=True,
 ):
     """Fit any catalog and return fitted factors with no truth comparison.
 
@@ -283,6 +295,7 @@ def fit_catalog(
         spectral_smoothness_strength,
         spatial_smoothness_strength,
         catalog=catalog,
+        positivity=positivity,
     )
     blend = spaxlet.Blend(sources, observation)
     optimizer_arguments = (
@@ -298,7 +311,9 @@ def fit_catalog(
         # Every declared start is already in the unit-L1 morphology gauge.
         # Penalty proximal maps are intentionally not treated as scale-invariant
         # feasibility projections by Blend's generic normalization guard.
-        normalize_initial_factors=spatial_smoothness_strength == 0,
+        # The unit-L1 gauge is only well posed for a non-negative morphology,
+        # and Blend refuses it otherwise, so the diagnostic arm forgoes it.
+        normalize_initial_factors=spatial_smoothness_strength == 0 and positivity,
         **optimizer_arguments,
     )
 
@@ -337,6 +352,7 @@ def fit_recovery_cube(
     spectral_smoothness_strength=0,
     spatial_smoothness_strength=0,
     catalog=None,
+    positivity=True,
 ):
     """Fit one deterministic start and return source-resolved truth metrics."""
 
@@ -348,6 +364,7 @@ def fit_recovery_cube(
         optimizer=optimizer,
         spectral_smoothness_strength=spectral_smoothness_strength,
         spatial_smoothness_strength=spatial_smoothness_strength,
+        positivity=positivity,
     )
     fitted_spectra = fit["fitted_spectra"]
     fitted_morphologies = fit["fitted_morphologies"]

@@ -66,6 +66,41 @@ class _NoiseArm:
         return False
 
 
+class _ScaledNoiseArm:
+    """Scale the injected residual and its declared variance together.
+
+    Scaling both keeps the likelihood correctly specified at every noise
+    level, so the arm measures how the bias depends on the noise rather than
+    how it responds to a mis-stated weight.  A bilinear estimator's
+    second-order bias goes as the variance, so halving the noise should divide
+    the bias by about four; a first-order effect would only halve it.
+    """
+
+    def __init__(self, scale):
+        if scale <= 0:
+            raise ValueError("noise scale must be positive")
+        self._scale = float(scale)
+        self._saved = None
+
+    def __enter__(self):
+        self._saved = recovery.recovery_noisy_cube
+        original, scale = self._saved, self._scale
+
+        def scaled(seed=None):
+            data, variance, valid, truth, residual = original(seed=seed)
+            scaled_residual = residual * scale
+            scaled_data = truth + scaled_residual
+            scaled_data[~valid] = 0.0
+            return scaled_data, variance * scale**2, valid, truth, scaled_residual
+
+        recovery.recovery_noisy_cube = scaled
+        return self
+
+    def __exit__(self, *exception):
+        recovery.recovery_noisy_cube = self._saved
+        return False
+
+
 def _positivity_activity(result):
     """Fraction of fitted morphology pixels pinned at zero inside the support."""
 
@@ -82,15 +117,18 @@ def _positivity_activity(result):
     return pinned / total
 
 
-def run_arm(name, standard_noise, max_iter, seed):
+def run_arm(name, standard_noise, max_iter, seed, positivity=True):
     with _NoiseArm(standard_noise):
         # The fixture caches nothing, but the runner imports the noisy-cube
         # helper by name, so both module bindings must see the swap.
-        result = recovery.fit_recovery_cube(start="A", max_iter=max_iter, seed=seed)
+        result = recovery.fit_recovery_cube(
+            start="A", max_iter=max_iter, seed=seed, positivity=positivity
+        )
     signed = signed_source_metrics(result.fitted_spectra)
     lens = SOURCE_NAMES.index("lens")
     return {
         "arm": name,
+        "positivity": positivity,
         "chi2_per_valid_voxel": result.chi2_per_valid_voxel,
         "relative_projected_gradient": result.relative_projected_gradient,
         "lens_signed": float(signed["signed_total_relative"][lens]),
@@ -106,14 +144,48 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--max-iter", type=int, default=RECOVERY_CONVERGED_MAX_ITER)
     parser.add_argument("--seed", type=int, default=contract.RECOVERY_SEED)
+    parser.add_argument("--noise-scales", default="")
     args = parser.parse_args()
 
+    if args.noise_scales:
+        scales = tuple(float(v) for v in args.noise_scales.split(","))
+        print(
+            "{:<8} {:>10} {:>10} {:>10} {:>10} {:>12} {:>12}".format(
+                "scale", "chi2/N", "rpg", "lens", "max|d|", "lens/scale", "lens/scale^2"
+            )
+        )
+        for scale in scales:
+            with _ScaledNoiseArm(scale):
+                entry = run_arm(
+                    "white", _white_standard_noise, args.max_iter, args.seed
+                )
+            print(
+                "{:<8.3f} {:>10.6f} {:>10.2e} {:>+10.5f} {:>10.5f} "
+                "{:>12.5f} {:>12.5f}".format(
+                    scale,
+                    entry["chi2_per_valid_voxel"],
+                    entry["relative_projected_gradient"],
+                    entry["lens_signed"],
+                    entry["max_abs_signed"],
+                    entry["lens_signed"] / scale,
+                    entry["lens_signed"] / scale**2,
+                )
+            )
+        return
+
+    # A 2x2 over the two candidate causes.  Correlated-versus-white isolates
+    # the diagonal-variance misspecification; positivity on-versus-off isolates
+    # the clipped-estimator effect.  If both together explain the bias, the
+    # white/no-positivity cell should be near zero.
     arms = (
-        ("correlated", contract._correlated_standard_noise),
-        ("white", _white_standard_noise),
+        ("corr+pos", contract._correlated_standard_noise, True),
+        ("corr-pos", contract._correlated_standard_noise, False),
+        ("white+pos", _white_standard_noise, True),
+        ("white-pos", _white_standard_noise, False),
     )
     results = [
-        run_arm(name, noise, args.max_iter, args.seed) for name, noise in arms
+        run_arm(name, noise, args.max_iter, args.seed, positivity)
+        for name, noise, positivity in arms
     ]
 
     print(
