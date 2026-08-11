@@ -176,6 +176,40 @@ class VariableProjectionTest(unittest.TestCase):
         self.assertLess(regularized_volume, baseline_volume)
         self.assertLessEqual(regularized.loss[-1], baseline.loss[-1] + 0.1 * baseline_volume)
 
+    def test_profiles_spectra_with_source_specific_fixed_support(self):
+        morphology_a = np.zeros(self.shape[1:])
+        morphology_a[1:3, 1:3] = 0.25
+        morphology_b = np.zeros(self.shape[1:])
+        morphology_b[4:6, 4:6] = 0.25
+        truth = np.asarray(
+            [[0.5, 0.0], [0.8, 1.2], [1.1, 0.9], [1.4, 0.0], [1.7, 0.0]]
+        )
+        first = _component(
+            self.frame, np.ones(self.shape[0]), morphology_a,
+            fixed_morphology=True,
+        )
+        second = _component(
+            self.frame, np.ones(self.shape[0]), morphology_b,
+            fixed_morphology=True,
+        )
+        support = np.asarray([False, True, True, False, False])
+        second.spectrum.parameters[0].constraint = spaxlet.SpectralSupportConstraint(
+            support
+        )
+        data = (
+            truth[:, 0, None, None] * morphology_a
+            + truth[:, 1, None, None] * morphology_b
+        )
+        blend = spaxlet.Blend([first, second], self.observation(data))
+
+        blend.fit(1, optimizer="variable_projection", e_rel=0)
+
+        recovered = np.stack(
+            [first.spectrum.get_model(), second.spectrum.get_model()], axis=1
+        )
+        np.testing.assert_allclose(recovered, truth, atol=2e-12)
+        np.testing.assert_array_equal(recovered[~support, 1], 0)
+
     def test_volume_gradient_matches_finite_difference(self):
         rng = np.random.RandomState(19)
         spectra = rng.uniform(0.3, 1.8, size=(7, 3))

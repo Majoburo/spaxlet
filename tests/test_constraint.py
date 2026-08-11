@@ -18,6 +18,16 @@ class TestUpdate(object):
         X_ = constraint(X, step)
         assert all(X_ >= threshold)
 
+    def test_spectral_support(self):
+        support = np.asarray([False, False, True, True, False])
+        constraint = spaxlet.SpectralSupportConstraint(support, zero=0.1)
+        projected = constraint(np.asarray([4.0, -2.0, -1.0, 3.0, 5.0]), 0)
+        assert_array_equal(projected, [0.0, 0.0, 0.1, 3.0, 0.0])
+        with pytest.raises(ValueError, match="one-dimensional boolean"):
+            spaxlet.SpectralSupportConstraint([0, 1, 1])
+        with pytest.raises(ValueError, match="match the parameter shape"):
+            constraint(np.ones(3), 0)
+
     def test_normalization(self):
         X = np.random.rand(100)
         step = 0

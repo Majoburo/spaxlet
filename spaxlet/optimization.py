@@ -4,7 +4,7 @@ import numpy as np
 from autograd import grad
 
 from .component import FactorizedComponent
-from .constraint import PositivityConstraint
+from .constraint import PositivityConstraint, SpectralSupportConstraint
 from .morphology import ImageMorphology
 from .spectrum import TabulatedSpectrum
 
@@ -120,6 +120,7 @@ def _validate_factorized_problem(blend):
             "variable projection does not support free observation parameters"
         )
     image_parameters = []
+    spectral_supports = []
     for source in blend.sources:
         if not isinstance(source, FactorizedComponent):
             raise TypeError(
@@ -149,9 +150,13 @@ def _validate_factorized_problem(blend):
             raise ValueError(
                 "variable projection does not yet support per-parameter priors"
             )
-        if not isinstance(spectrum.constraint, PositivityConstraint):
+        if isinstance(spectrum.constraint, PositivityConstraint):
+            spectral_supports.append(np.ones(blend.frame.C, dtype=bool))
+        elif isinstance(spectrum.constraint, SpectralSupportConstraint):
+            spectral_supports.append(spectrum.constraint.support.copy())
+        else:
             raise ValueError(
-                "variable projection requires non-negative spectra"
+                "variable projection requires non-negative or fixed-support spectra"
             )
         if not image.fixed:
             if image.constraint is not None and not getattr(
@@ -175,7 +180,12 @@ def _validate_factorized_problem(blend):
         raise ValueError(
             "variable projection requires every model channel to be observed"
         )
-    return tuple(image_parameters), image_indices, channel_indices
+    return (
+        tuple(image_parameters),
+        image_indices,
+        channel_indices,
+        np.asarray(spectral_supports, dtype=bool),
+    )
 
 
 def _source_basis(source, observation, morphology):
@@ -274,13 +284,18 @@ def _profile_spectra(
     volume_strength,
     spectral_max_iter,
     spectral_tolerance,
+    spectral_supports,
 ):
     grams, matched, constant = _spectral_statistics(
         blend, morphologies, channel_indices
     )
-    spectra = np.asarray(
-        [_solve_nonnegative_gram(gram, target) for gram, target in zip(grams, matched)]
-    )
+    spectra = np.zeros_like(matched)
+    for channel, (gram, target) in enumerate(zip(grams, matched)):
+        active = spectral_supports[:, channel]
+        if np.any(active):
+            spectra[channel, active] = _solve_nonnegative_gram(
+                gram[np.ix_(active, active)], target[active]
+            )
     if volume_strength > 0.0:
         spectra, objective = _solve_regularized_spectra(
             spectra,
@@ -310,15 +325,22 @@ def fit_variable_projection(
     spectral_tolerance,
 ):
     """Fit factorized sources with exact spectra and projected morphologies."""
-    image_parameters, image_indices, channel_indices = _validate_factorized_problem(
-        blend
-    )
+    (
+        image_parameters,
+        image_indices,
+        channel_indices,
+        spectral_supports,
+    ) = _validate_factorized_problem(blend)
     if max_backtracks < 0 or spectral_max_iter < 1:
         raise ValueError("optimizer iteration counts must be non-negative")
     if volume_strength < 0.0 or not np.isfinite(volume_strength):
         raise ValueError("volume_strength must be finite and non-negative")
     if spectral_tolerance <= 0.0 or not np.isfinite(spectral_tolerance):
         raise ValueError("spectral_tolerance must be finite and positive")
+    if volume_strength > 0 and not np.all(spectral_supports):
+        raise ValueError(
+            "minimum-volume regularization does not support fixed spectral supports"
+        )
 
     morphologies = [
         np.asarray(source.morphology.parameters[0], dtype=float).copy()
@@ -331,6 +353,7 @@ def fit_variable_projection(
         volume_strength,
         spectral_max_iter,
         spectral_tolerance,
+        spectral_supports,
     )
     for source, values in zip(blend.sources, spectra.T):
         source.spectrum.parameters[0][...] = values
@@ -394,6 +417,7 @@ def fit_variable_projection(
                         volume_strength,
                         spectral_max_iter,
                         spectral_tolerance,
+                        spectral_supports,
                     )
                     tolerance = 10.0 * np.finfo(float).eps * max(
                         abs(objective), 1.0

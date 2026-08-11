@@ -55,6 +55,42 @@ class IFUWavelengthGridTest(unittest.TestCase):
         )
         self.assertIs(observation.match(frame).model_frame, frame)
 
+    def test_overlapping_observation_grids_use_explicit_segments(self):
+        channels = ["prism:0", "prism:1", "prism:2", "g395h:0", "g395h:1"]
+        frame = spaxlet.Frame(
+            (5, 5, 7),
+            channels=channels,
+            psf=spaxlet.DeltaPSF(5),
+            wavelength_segments=(
+                np.array([1.0, 2.0, 3.0]) * u.um,
+                np.array([2.5, 2.6]) * u.um,
+            ),
+        )
+        self.assertEqual(frame.wavelength_segments, (slice(0, 3), slice(3, 5)))
+        np.testing.assert_allclose(
+            frame.wavelengths.to_value(u.um), [1.0, 2.0, 3.0, 2.5, 2.6]
+        )
+        prism = self._observation(
+            np.array([1.0, 2.0, 3.0]) * u.um,
+            channels=channels[:3],
+            psf=spaxlet.DeltaPSF(3),
+        )
+        g395h = self._observation(
+            np.array([2.5, 2.6]) * u.um,
+            channels=channels[3:],
+            psf=spaxlet.DeltaPSF(2),
+        )
+        self.assertIs(prism.match(frame).model_frame, frame)
+        self.assertIs(g395h.match(frame).model_frame, frame)
+
+        with self.assertRaisesRegex(ValueError, "cover every spectral channel"):
+            spaxlet.Frame(
+                (5, 5, 7),
+                channels=channels,
+                psf=spaxlet.DeltaPSF(5),
+                wavelength_segments=(np.array([1.0, 2.0]) * u.um,),
+            )
+
     def test_noncontiguous_subset_maps_model_and_psf_channels(self):
         model_psfs = np.zeros((4, 3, 3), dtype=float)
         observed_psfs = np.zeros((2, 3, 3), dtype=float)
@@ -107,6 +143,76 @@ class IFUWavelengthGridTest(unittest.TestCase):
         self.assertTrue(np.all(gradient[1] == 0))
         self.assertTrue(np.any(gradient[2] != 0))
         self.assertTrue(np.all(gradient[3] == 0))
+
+    def test_shared_latent_spectrum_is_binned_and_differentiable(self):
+        model_wavelengths = np.array(
+            [0.875, 1.125, 1.375, 1.625, 1.875, 2.125]
+        ) * u.um
+        observed_wavelengths = np.array([1.0, 1.5, 2.0]) * u.um
+        response = spaxlet.binned_spectral_response(
+            model_wavelengths, observed_wavelengths
+        )
+        np.testing.assert_array_equal(
+            response.indices, [[0, 1], [2, 3], [4, 5]]
+        )
+        np.testing.assert_allclose(response.weights, 0.5)
+
+        frame = spaxlet.Frame(
+            (6, 5, 7),
+            channels=["latent:{}".format(index) for index in range(6)],
+            psf=spaxlet.DeltaPSF(6),
+            wavelengths=model_wavelengths,
+        )
+        observation = self._observation(
+            observed_wavelengths,
+            channels=["prism:0", "prism:1", "prism:2"],
+            psf=spaxlet.DeltaPSF(3),
+        ).match(frame, spectral_response=response)
+        spectrum = np.arange(1.0, 7.0)
+        model = np.broadcast_to(spectrum[:, None, None], frame.shape).copy()
+        expected = np.array([1.5, 3.5, 5.5])[:, None, None]
+        np.testing.assert_allclose(
+            observation.render(model),
+            np.broadcast_to(expected, observation.shape),
+            rtol=0,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            observation.renderer.render_channels(model, 1, 3),
+            np.broadcast_to(expected[1:], (2, 5, 7)),
+            rtol=0,
+            atol=1e-12,
+        )
+        gradient = grad(lambda value: np.sum(observation.render(value)))(model)
+        np.testing.assert_allclose(gradient, 0.5)
+
+    def test_spectral_response_requires_coverage_and_normalized_rows(self):
+        with self.assertRaisesRegex(ValueError, "do not cover"):
+            spaxlet.binned_spectral_response(
+                np.array([1.0, 1.1, 1.2]) * u.um,
+                np.array([0.9, 1.1]) * u.um,
+            )
+        with self.assertRaisesRegex(ValueError, "sum to one"):
+            spaxlet.SpectralResponse([[0, 1]], [[0.2, 0.3]], 2)
+
+    def test_gaussian_spectral_response_conserves_constant_flux_density(self):
+        model_wavelengths = np.arange(0.5, 2.51, 0.05) * u.um
+        observed_wavelengths = np.asarray([1.0, 1.5, 2.0]) * u.um
+        response = spaxlet.gaussian_spectral_response(
+            model_wavelengths,
+            observed_wavelengths,
+            np.asarray([0.2, 0.3, 0.4]) * u.um,
+        )
+        np.testing.assert_allclose(response.weights.sum(axis=1), 1)
+        constant = np.full(model_wavelengths.size, 7.5)
+        mapped = np.sum(
+            constant[response.indices] * response.weights,
+            axis=1,
+        )
+        np.testing.assert_allclose(mapped, 7.5)
+        middle = response.weights[1]
+        middle = middle[middle > 0]
+        np.testing.assert_allclose(middle, middle[::-1], rtol=2e-13, atol=2e-13)
 
     def test_one_sided_wavelength_metadata_is_rejected(self):
         frame = self._frame(np.array([1.0, 1.1, 1.2]) * u.um)

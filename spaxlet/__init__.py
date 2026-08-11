@@ -7,6 +7,7 @@ from .constraint import (
     DykstraConstraintChain,
     ProximalDykstraConstraintChain,
     PositivityConstraint,
+    SpectralSupportConstraint,
     SpectralSmoothnessConstraint,
     SpatialSmoothnessConstraint,
     NormalizationConstraint,
@@ -26,12 +27,17 @@ from .degeneracy import (
 )
 from .frame import Frame
 from .ifu import (
+    binned_spectral_response,
     crop_psf_kernels,
     empirical_psf_kernels,
     estimate_ifu_background,
+    gaussian_spectral_response,
     IFUBackgroundEstimate,
+    isolated_spatial_outlier_mask,
     psf_centroids,
     recenter_psf_kernels,
+    selected_spectral_response,
+    SpectralResponse,
     spatial_interpolation_weights,
 )
 from .morphology import (

@@ -4,13 +4,340 @@ from collections import namedtuple
 import warnings
 
 import numpy as np
-from scipy.ndimage import shift
+from scipy.ndimage import label, shift
+from scipy.special import ndtr
+from scipy.sparse import csr_matrix
 
 
 IFUBackgroundEstimate = namedtuple(
     "IFUBackgroundEstimate",
     ("background", "noise_scale", "background_voxels"),
 )
+
+
+def isolated_spatial_outlier_mask(
+    data,
+    variance,
+    *,
+    valid_mask=None,
+    sigma=12.0,
+    grow_sigma=3.0,
+    max_spatial_pixels=12,
+):
+    """Flag compact high-significance islands in individual IFU slices.
+
+    This is an opt-in reduction helper for resampled cubes whose detector-level
+    outlier rejection left small positive or negative footprints behind.  A
+    candidate island must contain a voxel above ``sigma``, remain connected at
+    ``grow_sigma``, and cover no more than ``max_spatial_pixels`` in that
+    wavelength slice.  Larger PSF-supported sources are therefore retained.
+
+    Parameters
+    ----------
+    data, variance: array
+        Matching ``(channel, y, x)`` background-subtracted science and variance.
+    valid_mask: boolean array or None
+        Samples eligible for testing.  Invalid samples are never newly flagged.
+    sigma, grow_sigma: float
+        Seed and connected-footprint significance thresholds.  ``sigma`` must
+        be strictly larger than ``grow_sigma``.
+    max_spatial_pixels: int
+        Largest 8-connected footprint classified as an outlier.
+    """
+
+    values = np.asarray(data)
+    measured_variance = np.asarray(variance)
+    if values.ndim != 3 or measured_variance.shape != values.shape:
+        raise ValueError("IFU data and variance must have matching 3D shapes")
+    sigma = float(sigma)
+    grow_sigma = float(grow_sigma)
+    if (
+        not np.isfinite(sigma)
+        or not np.isfinite(grow_sigma)
+        or grow_sigma <= 0
+        or sigma <= grow_sigma
+    ):
+        raise ValueError("outlier sigma must exceed a positive grow sigma")
+    if not isinstance(max_spatial_pixels, (int, np.integer)):
+        raise TypeError("max_spatial_pixels must be an integer")
+    max_spatial_pixels = int(max_spatial_pixels)
+    if max_spatial_pixels <= 0:
+        raise ValueError("max_spatial_pixels must be positive")
+
+    finite = (
+        np.isfinite(values)
+        & np.isfinite(measured_variance)
+        & (measured_variance > 0)
+    )
+    if valid_mask is None:
+        valid = finite
+    else:
+        valid = np.asarray(valid_mask)
+        if valid.shape != values.shape or valid.dtype != bool:
+            raise ValueError("valid_mask must be boolean and match the IFU cube")
+        valid = valid & finite
+
+    significance = np.zeros(values.shape, dtype=float)
+    significance[valid] = values[valid] / np.sqrt(measured_variance[valid])
+    result = np.zeros(values.shape, dtype=bool)
+    connectivity = np.ones((3, 3), dtype=int)
+    for channel in range(values.shape[0]):
+        channel_valid = valid[channel]
+        for sign in (-1.0, 1.0):
+            footprint = channel_valid & (
+                sign * significance[channel] >= grow_sigma
+            )
+            labels, count = label(footprint, structure=connectivity)
+            if count == 0:
+                continue
+            sizes = np.bincount(labels.ravel())
+            seeds = np.unique(
+                labels[
+                    channel_valid
+                    & (sign * significance[channel] >= sigma)
+                ]
+            )
+            seeds = seeds[seeds != 0]
+            compact = seeds[sizes[seeds] <= max_spatial_pixels]
+            if compact.size:
+                result[channel] |= np.isin(labels, compact)
+    return result
+
+
+class SpectralResponse:
+    """Sparse, fixed mapping from a latent to an observed wavelength grid.
+
+    ``indices[row]`` identifies the latent spectral samples contributing to
+    one observed channel and ``weights[row]`` gives their flux-density
+    weights.  Rows are padded with zero-weight entries so the response stays
+    a small, human-auditable pair of two-dimensional arrays rather than a
+    usually enormous dense matrix.
+    """
+
+    def __init__(self, indices, weights, model_channel_count):
+        indices = np.asarray(indices)
+        weights = np.asarray(weights)
+        if indices.ndim != 2 or weights.shape != indices.shape:
+            raise ValueError("spectral response indices and weights must match in 2D")
+        if not np.issubdtype(indices.dtype, np.integer):
+            raise TypeError("spectral response indices must be integers")
+        if not isinstance(model_channel_count, (int, np.integer)):
+            raise TypeError("model_channel_count must be an integer")
+        model_channel_count = int(model_channel_count)
+        if model_channel_count <= 0:
+            raise ValueError("model_channel_count must be positive")
+        if indices.shape[0] == 0 or indices.shape[1] == 0:
+            raise ValueError("a spectral response must contain at least one entry")
+        if np.any(indices < 0) or np.any(indices >= model_channel_count):
+            raise ValueError("spectral response index is outside the latent grid")
+        if np.any(~np.isfinite(weights)) or np.any(weights < 0):
+            raise ValueError("spectral response weights must be finite and non-negative")
+        row_sum = np.sum(weights, axis=1)
+        if np.any(row_sum <= np.finfo(float).tiny):
+            raise ValueError("every spectral response row must contain positive weight")
+        if not np.allclose(row_sum, 1.0, rtol=1e-7, atol=1e-7):
+            raise ValueError("spectral response weights must sum to one in every row")
+        self.indices = indices.astype(int, copy=False)
+        self.weights = weights
+        self.model_channel_count = model_channel_count
+        rows = np.repeat(np.arange(indices.shape[0]), indices.shape[1])
+        self.matrix = csr_matrix(
+            (weights.ravel(), (rows, self.indices.ravel())),
+            shape=(indices.shape[0], model_channel_count),
+        )
+        self.matrix.eliminate_zeros()
+
+    @property
+    def observation_channel_count(self):
+        return self.indices.shape[0]
+
+
+def _wavelength_values(wavelengths, unit=None):
+    if hasattr(wavelengths, "unit"):
+        resolved_unit = wavelengths.unit if unit is None else unit
+        values = np.asarray(wavelengths.to_value(resolved_unit), dtype=float)
+        return values, resolved_unit
+    if unit is not None:
+        raise TypeError("both wavelength grids must carry compatible units")
+    return np.asarray(wavelengths, dtype=float), None
+
+
+def _wavelength_bin_edges(centers):
+    centers = np.asarray(centers, dtype=float)
+    if centers.ndim != 1 or centers.size < 2:
+        raise ValueError("a wavelength grid must contain at least two samples")
+    if np.any(~np.isfinite(centers)) or np.any(np.diff(centers) <= 0):
+        raise ValueError("wavelength samples must be finite and strictly increasing")
+    edges = np.empty(centers.size + 1, dtype=float)
+    edges[1:-1] = 0.5 * (centers[:-1] + centers[1:])
+    edges[0] = centers[0] - 0.5 * (centers[1] - centers[0])
+    edges[-1] = centers[-1] + 0.5 * (centers[-1] - centers[-2])
+    return edges
+
+
+def binned_spectral_response(
+    model_wavelengths,
+    observed_wavelengths,
+    dtype=None,
+    *,
+    extrapolate_edges=False,
+):
+    """Integrate latent flux density into observed wavelength bins.
+
+    Both grids contain bin centers and must be strictly increasing.  The
+    returned sparse response uses exact top-hat bin overlaps and preserves a
+    constant flux density.  The latent grid must cover every observed bin;
+    instrumental line-spread broadening, when known, belongs in a subsequent
+    response rather than being silently guessed here.  ``extrapolate_edges``
+    extends the nearest latent flux density only across a partially cropped
+    first or last observed bin.
+    """
+
+    model, unit = _wavelength_values(model_wavelengths)
+    observed, _ = _wavelength_values(observed_wavelengths, unit)
+    model_edges = _wavelength_bin_edges(model)
+    observed_edges = _wavelength_bin_edges(observed)
+    scale = max(abs(observed_edges[0]), abs(observed_edges[-1]), 1.0)
+    tolerance = 32 * np.finfo(float).eps * scale
+    outside = (
+        observed_edges[0] < model_edges[0] - tolerance
+        or observed_edges[-1] > model_edges[-1] + tolerance
+    )
+    if outside and not extrapolate_edges:
+        raise ValueError("latent wavelength bins do not cover the observation")
+
+    rows = []
+    row_weights = []
+    maximum_support = 0
+    for lower, upper in zip(observed_edges[:-1], observed_edges[1:]):
+        clipped_lower = max(lower, model_edges[0])
+        clipped_upper = min(upper, model_edges[-1])
+        first = max(
+            int(np.searchsorted(model_edges, clipped_lower, side="right")) - 1,
+            0,
+        )
+        last = min(
+            int(np.searchsorted(model_edges, clipped_upper, side="left")),
+            model.size,
+        )
+        candidates = np.arange(first, last, dtype=int)
+        overlap = np.maximum(
+            0.0,
+            np.minimum(clipped_upper, model_edges[candidates + 1])
+            - np.maximum(clipped_lower, model_edges[candidates]),
+        )
+        selected = overlap > tolerance
+        candidates = candidates[selected]
+        overlap = overlap[selected]
+        if extrapolate_edges and lower < model_edges[0]:
+            missing = model_edges[0] - lower
+            if candidates.size and candidates[0] == 0:
+                overlap[0] += missing
+            else:
+                candidates = np.insert(candidates, 0, 0)
+                overlap = np.insert(overlap, 0, missing)
+        if extrapolate_edges and upper > model_edges[-1]:
+            missing = upper - model_edges[-1]
+            if candidates.size and candidates[-1] == model.size - 1:
+                overlap[-1] += missing
+            else:
+                candidates = np.append(candidates, model.size - 1)
+                overlap = np.append(overlap, missing)
+        covered = float(np.sum(overlap))
+        width = upper - lower
+        if not np.isclose(covered, width, rtol=1e-9, atol=tolerance):
+            raise ValueError("latent wavelength bins leave an observed bin uncovered")
+        rows.append(candidates)
+        row_weights.append(overlap / covered)
+        maximum_support = max(maximum_support, candidates.size)
+
+    resolved_dtype = np.dtype(float if dtype is None else dtype)
+    indices = np.zeros((observed.size, maximum_support), dtype=int)
+    weights = np.zeros((observed.size, maximum_support), dtype=resolved_dtype)
+    for row, (selected_indices, selected_weights) in enumerate(zip(rows, row_weights)):
+        count = selected_indices.size
+        indices[row, :count] = selected_indices
+        weights[row, :count] = selected_weights
+    return SpectralResponse(indices, weights, model.size)
+
+
+def selected_spectral_response(model_channel_count, indices, dtype=None):
+    """Return an exact channel-selection response on a latent spectral grid."""
+
+    selected = np.asarray(indices)
+    if selected.ndim != 1:
+        raise ValueError("selected spectral indices must be one-dimensional")
+    weights = np.ones((selected.size, 1), dtype=float if dtype is None else dtype)
+    return SpectralResponse(selected[:, None], weights, model_channel_count)
+
+
+def gaussian_spectral_response(
+    model_wavelengths,
+    observed_wavelengths,
+    fwhm,
+    dtype=None,
+    *,
+    truncate=4.0,
+):
+    """Integrate latent flux-density bins through a Gaussian line response.
+
+    ``fwhm`` supplies one line full width at half maximum per observed
+    channel, in the same units as numeric wavelength inputs or as a compatible
+    quantity. Each sparse row contains exact Gaussian-CDF integrals over the
+    latent bin edges and is normalized after finite-tail and grid-edge
+    truncation.
+    """
+
+    model, unit = _wavelength_values(model_wavelengths)
+    observed, _ = _wavelength_values(observed_wavelengths, unit)
+    if hasattr(fwhm, "unit"):
+        widths = np.asarray(fwhm.to_value(unit), dtype=float)
+    else:
+        widths = np.asarray(fwhm, dtype=float)
+    if widths.ndim == 0:
+        widths = np.full(observed.shape, float(widths))
+    if widths.shape != observed.shape:
+        raise ValueError("fwhm must be scalar or match observed wavelengths")
+    truncate = float(truncate)
+    if (
+        np.any(~np.isfinite(widths))
+        or np.any(widths <= 0)
+        or not np.isfinite(truncate)
+        or truncate <= 0
+    ):
+        raise ValueError("Gaussian spectral widths and truncation must be positive")
+    model_edges = _wavelength_bin_edges(model)
+    sigma = widths / np.sqrt(8.0 * np.log(2.0))
+    rows = []
+    row_weights = []
+    maximum_support = 0
+    for center, scale in zip(observed, sigma):
+        lower = center - truncate * scale
+        upper = center + truncate * scale
+        first = max(int(np.searchsorted(model_edges, lower, side="right")) - 1, 0)
+        last = min(int(np.searchsorted(model_edges, upper, side="left")), model.size)
+        indices = np.arange(first, last, dtype=int)
+        weights = ndtr((model_edges[indices + 1] - center) / scale) - ndtr(
+            (model_edges[indices] - center) / scale
+        )
+        selected = weights > np.finfo(float).eps
+        indices = indices[selected]
+        weights = weights[selected]
+        mass = float(np.sum(weights))
+        if mass <= np.finfo(float).tiny:
+            raise ValueError("Gaussian spectral response misses the latent grid")
+        rows.append(indices)
+        row_weights.append(weights / mass)
+        maximum_support = max(maximum_support, indices.size)
+
+    resolved_dtype = np.dtype(float if dtype is None else dtype)
+    indices = np.zeros((observed.size, maximum_support), dtype=int)
+    weights = np.zeros((observed.size, maximum_support), dtype=resolved_dtype)
+    for row, (selected_indices, selected_weights) in enumerate(zip(rows, row_weights)):
+        count = selected_indices.size
+        indices[row, :count] = selected_indices
+        weights[row, :count] = selected_weights
+    return SpectralResponse(indices, weights, model.size)
 
 
 def _validate_psf_kernels(kernels):

@@ -102,6 +102,29 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--background-radius", type=float, default=4.0)
     parser.add_argument("--noise-scale", type=float)
     parser.add_argument(
+        "--outlier-sigma",
+        type=float,
+        default=12.0,
+        help="seed threshold for compact spatial outlier footprints",
+    )
+    parser.add_argument(
+        "--outlier-grow-sigma",
+        type=float,
+        default=3.0,
+        help="connected-footprint threshold for spatial outliers",
+    )
+    parser.add_argument(
+        "--outlier-max-spatial-pixels",
+        type=int,
+        default=12,
+        help="largest per-slice footprint classified as a cube outlier",
+    )
+    parser.add_argument(
+        "--disable-outlier-mask",
+        action="store_true",
+        help="retain compact high-significance islands left by cube building",
+    )
+    parser.add_argument(
         "--support-padding",
         type=int,
         default=0,
@@ -574,6 +597,21 @@ def main() -> None:
     )
     background = background_estimate.background
     variance = np.asarray((error * applied_noise_scale) ** 2, dtype=dtype)
+    outlier_mask = np.zeros(data.shape, dtype=bool)
+    if not args.disable_outlier_mask:
+        outlier_mask = spaxlet.isolated_spatial_outlier_mask(
+            data,
+            variance,
+            valid_mask=raw_valid,
+            sigma=args.outlier_sigma,
+            grow_sigma=args.outlier_grow_sigma,
+            max_spatial_pixels=args.outlier_max_spatial_pixels,
+        )
+        if np.any(outlier_mask):
+            data = data.copy()
+            data[outlier_mask] = 0
+            dq = dq.copy()
+            dq[outlier_mask] |= np.uint32(1)
 
     psf_half_width = args.psf_spectral_half_width
     if psf_half_width is None:
@@ -819,6 +857,16 @@ def main() -> None:
         "applied_noise_scale": applied_noise_scale,
         "background_voxels": background_estimate.background_voxels,
         "raw_valid_fraction": float(np.mean(raw_valid)),
+        "isolated_spatial_outlier_mask": {
+            "enabled": not args.disable_outlier_mask,
+            "seed_sigma": args.outlier_sigma,
+            "grow_sigma": args.outlier_grow_sigma,
+            "max_spatial_pixels": args.outlier_max_spatial_pixels,
+            "masked_voxels": int(np.count_nonzero(outlier_mask)),
+            "affected_channels": int(
+                np.count_nonzero(np.any(outlier_mask, axis=(1, 2)))
+            ),
+        },
         "ifu_mask_summary": observation.ifu_mask_summary,
         "psf": {
             "kernel_size": args.kernel_size,

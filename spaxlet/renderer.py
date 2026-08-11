@@ -14,11 +14,24 @@ from spaxlet.operators_pybind11 import apply_filter
 
 
 class Renderer(Model):
-    def __init__(self, data_frame, model_frame, *parameters):
+    def __init__(
+        self, data_frame, model_frame, *parameters, spectral_response=None
+    ):
         self.data_frame = data_frame
         self.model_frame = model_frame
-        # mapping of model to data frame channels
-        self.channel_map = self.get_channel_map(data_frame, model_frame)
+        self.spectral_response = spectral_response
+        if spectral_response is None:
+            self.channel_map = self.get_channel_map(data_frame, model_frame)
+        else:
+            from .ifu import SpectralResponse
+
+            if not isinstance(spectral_response, SpectralResponse):
+                raise TypeError("spectral_response must be a SpectralResponse")
+            if spectral_response.model_channel_count != model_frame.C:
+                raise ValueError("spectral response does not match the model frame")
+            if spectral_response.observation_channel_count != data_frame.C:
+                raise ValueError("spectral response does not match the data frame")
+            self.channel_map = None
 
         super().__init__(*parameters)
 
@@ -67,7 +80,7 @@ class Renderer(Model):
             #   combination of obs and model channels
         return channel_map
 
-    def map_channels(self, model):
+    def map_channels(self, model, start=None, stop=None):
         """Map to model channels onto the observation channels
 
         Parameters
@@ -80,11 +93,18 @@ class Renderer(Model):
         obs_model: array
             `model` mapped onto the observation channels
         """
+        if (start is None) != (stop is None):
+            raise ValueError("both spectral channel bounds must be supplied")
+        if start is None:
+            start, stop = 0, self.data_frame.C
+        if self.spectral_response is not None:
+            response_matrix = self.spectral_response.matrix[start:stop]
+            return _apply_spectral_response(model, response_matrix)
         if self.channel_map is None:
-            return model
+            return model[start:stop]
         if isinstance(self.channel_map, slice):
-            return model[self.channel_map]
-        return model[self.channel_map]
+            return model[self.channel_map][start:stop]
+        return model[self.channel_map][start:stop]
 
     def map_model_psf_channels(self, psf):
         """Select model PSFs on the observation's channel grid.
@@ -126,7 +146,7 @@ class NullRenderer(Renderer):
         return nothing
 
     def render_channels(self, model, start, stop, *parameters):
-        return self.map_channels(model)[start:stop]
+        return self.map_channels(model, start, stop)
 
 
 @primitive
@@ -194,6 +214,31 @@ def _grad_match_shape(upstream_grad, model, data_frame, slices):
 
 
 defvjp(match_shape, _grad_match_shape)
+
+
+@primitive
+def _apply_spectral_response(model, response_matrix):
+    """Apply a fixed sparse spectral matrix without a 5D gather temporary."""
+
+    model = onp.asarray(model)
+    flattened = model.reshape(model.shape[0], -1)
+    mapped = response_matrix @ flattened
+    return onp.asarray(mapped).reshape(response_matrix.shape[0], *model.shape[1:])
+
+
+def _spectral_response_vjp(result, model, response_matrix):
+    del result
+
+    def transpose(upstream):
+        upstream = onp.asarray(upstream)
+        flattened = upstream.reshape(upstream.shape[0], -1)
+        mapped = response_matrix.T @ flattened
+        return onp.asarray(mapped).reshape(model.shape)
+
+    return transpose
+
+
+defvjp(_apply_spectral_response, _spectral_response_vjp, None)
 
 
 @primitive
@@ -272,13 +317,19 @@ class ConvolutionRenderer(Renderer):
         convolution_type="fft",
         padding=10,
         psf_shift=None,
+        spectral_response=None,
     ):
 
         if psf_shift is not None:
             psf_shift = Parameter(psf_shift, name="psf_shift", step=1.0e-2)
             parameters = (*parameters, psf_shift)
 
-        super().__init__(data_frame, model_frame, *parameters)
+        super().__init__(
+            data_frame,
+            model_frame,
+            *parameters,
+            spectral_response=spectral_response,
+        )
 
         assert convolution_type in [
             "real",
@@ -367,7 +418,7 @@ class ConvolutionRenderer(Renderer):
                     "channel chunking requires aligned spatial frame bounds"
                 )
 
-        model_ = self.map_channels(model)[start:stop]
+        model_ = self.map_channels(model, start, stop)
         shift = self.get_parameter("psf_shift", *parameters)
         kernel = self.diff_kernel.image[start:stop]
         return self.convolve(model_, psf_shift=shift, kernel=kernel)

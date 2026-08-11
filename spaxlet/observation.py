@@ -176,7 +176,7 @@ class Observation(Frame):
         }
         return observation
 
-    def match(self, model_frame, renderer=None):
+    def match(self, model_frame, renderer=None, spectral_response=None):
         """Match the frame of the model to the frame of this observation.
 
         The method sets up the mappings in spectral and spatial coordinates,
@@ -194,11 +194,16 @@ class Observation(Frame):
         -------
         None
         """
+        if renderer is not None and spectral_response is not None:
+            raise ValueError("pass either renderer or spectral_response, not both")
+        explicit_response = spectral_response
+        if renderer is not None:
+            explicit_response = getattr(renderer, "spectral_response", None)
         if (self.wavelengths is None) != (model_frame.wavelengths is None):
             raise ValueError(
                 "model and observation must either both declare wavelengths or neither"
             )
-        if self.wavelengths is not None:
+        if self.wavelengths is not None and explicit_response is None:
             model_channels = list(model_frame.channels)
             try:
                 indices = [model_channels.index(channel) for channel in self.channels]
@@ -229,7 +234,20 @@ class Observation(Frame):
 
         # choose the renderer
         if renderer is None:
-            if self.psf is model_frame.psf:
+            if spectral_response is not None:
+                if self.psf is None or model_frame.psf is None:
+                    raise ValueError("spectral response rendering requires both PSFs")
+                if self.wcs is not model_frame.wcs:
+                    raise NotImplementedError(
+                        "spectral response rendering currently requires aligned WCS"
+                    )
+                self.renderer = ConvolutionRenderer(
+                    self,
+                    model_frame,
+                    convolution_type="fft",
+                    spectral_response=spectral_response,
+                )
+            elif self.psf is model_frame.psf:
                 self.renderer = NullRenderer(self, model_frame)
             else:
                 assert self.psf is not None and model_frame.psf is not None

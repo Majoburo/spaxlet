@@ -34,6 +34,35 @@ def _validated_wavelengths(wavelengths, channels):
     return values.copy() * u.m
 
 
+def _validated_wavelength_segments(wavelength_segments, channels):
+    """Flatten independently increasing wavelength grids for joint data sets."""
+
+    if wavelength_segments is None:
+        return None, ()
+    try:
+        segments = tuple(wavelength_segments)
+    except TypeError as error:
+        raise TypeError("wavelength_segments must be an iterable of grids") from error
+    if not segments:
+        raise ValueError("wavelength_segments must not be empty")
+    values = []
+    slices = []
+    start = 0
+    for segment in segments:
+        try:
+            size = len(segment)
+        except TypeError as error:
+            raise TypeError("every wavelength segment must be one-dimensional") from error
+        stop = start + size
+        segment_channels = channels[start:stop]
+        values.append(_validated_wavelengths(segment, segment_channels))
+        slices.append(slice(start, stop))
+        start = stop
+    if start != len(channels):
+        raise ValueError("wavelength segments must cover every spectral channel")
+    return np.concatenate([value.to_value(u.m) for value in values]) * u.m, tuple(slices)
+
+
 class Frame:
     """Spatial and spectral characteristics of the data
 
@@ -61,11 +90,22 @@ class Frame:
         psf=None,
         dtype=np.float32,
         wavelengths=None,
+        wavelength_segments=None,
     ):
         self._bbox = Box(shape)
         assert len(channels) == self.C
         self.channels = channels
-        self.wavelengths = _validated_wavelengths(wavelengths, self.channels)
+        if wavelengths is not None and wavelength_segments is not None:
+            raise ValueError("use wavelengths or wavelength_segments, not both")
+        if wavelength_segments is None:
+            self.wavelengths = _validated_wavelengths(wavelengths, self.channels)
+            self.wavelength_segments = (
+                (slice(0, self.C),) if self.wavelengths is not None else ()
+            )
+        else:
+            self.wavelengths, self.wavelength_segments = (
+                _validated_wavelength_segments(wavelength_segments, self.channels)
+            )
 
         if wcs is not None:
             assert isinstance(wcs, astropy.wcs.WCS)
@@ -291,7 +331,12 @@ class Frame:
             channels=channels,
             psf=model_psf,
             wcs=model_wcs,
-            wavelengths=wavelengths,
+            wavelengths=wavelengths if len(wavelength_groups) == 1 else None,
+            wavelength_segments=(
+                wavelength_groups
+                if wavelengths is not None and len(wavelength_groups) > 1
+                else None
+            ),
         )
 
         # Determine overlap of all observations in pixel coordinates of the model frame
@@ -334,7 +379,12 @@ class Frame:
             channels=channels,
             psf=model_psf,
             wcs=model_wcs,
-            wavelengths=wavelengths,
+            wavelengths=wavelengths if len(wavelength_groups) == 1 else None,
+            wavelength_segments=(
+                wavelength_groups
+                if wavelengths is not None and len(wavelength_groups) > 1
+                else None
+            ),
         )
 
         # Match observations to this frame

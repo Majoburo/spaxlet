@@ -296,6 +296,33 @@ class PositivityConstraint(Constraint):
         return X
 
 
+class SpectralSupportConstraint(Constraint):
+    """Project a spectrum onto a fixed non-negative wavelength support.
+
+    Coefficients outside ``support`` are exactly zero. Coefficients inside the
+    support are bounded below by ``zero``. This is the exact Euclidean
+    projection onto the intersection of those two convex sets.
+    """
+
+    is_euclidean_projection = True
+
+    def __init__(self, support, zero=0):
+        support = np.asarray(support)
+        if support.ndim != 1 or support.dtype != np.bool_:
+            raise ValueError("spectral support must be a one-dimensional boolean array")
+        if not np.any(support):
+            raise ValueError("spectral support must retain at least one coefficient")
+        if not np.isfinite(zero) or zero < 0:
+            raise ValueError("spectral support floor must be finite and non-negative")
+        self.support = support.copy()
+        self.zero = float(zero)
+
+    def __call__(self, X, step):
+        if X.shape != self.support.shape:
+            raise ValueError("spectral support must match the parameter shape")
+        return np.where(self.support, np.maximum(X, self.zero), 0)
+
+
 class SpectralSmoothnessConstraint(Constraint):
     """Non-negative spectrum with quadratic wavelength-curvature penalty.
 
